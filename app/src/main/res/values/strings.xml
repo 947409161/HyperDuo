@@ -6,7 +6,8 @@
     <string name="group_appearance">外观</string>
     <string name="group_geometry">尺寸</string>
     <string name="group_colors">颜色</string>
-    <string name="group_advanced">高级</string>
+
+    <string name="tab_general">常规</string>
 
     <string name="master_title">启用三合一图标</string>
     <string name="master_summary">总开关。关闭后恢复系统原本的电池与信号图标。</string>
@@ -25,6 +26,9 @@
 
     <string name="show_mobile_type_title">显示网络类型</string>
     <string name="show_mobile_type_summary">无 Wi-Fi 时在圆环中间显示 3G/4G/5G 等网络类型，电量数字回到顶部。</string>
+
+    <string name="swap_wifi_value_title">Wi-Fi 与数字换位</string>
+    <string name="swap_wifi_value_summary">电量数字放大到圆环中间，Wi-Fi 弧缩到顶部缺口；充电时由大闪电占据圆心。</string>
 
     <string name="color_role_title">状态颜色</string>
     <string name="color_role_summary">分别为低电量、充电与危险电量指定颜色。</string>
@@ -67,10 +71,12 @@
     <string name="debug_title">调试日志</string>
     <string name="debug_summary">把详细过程写入 LSPosed 日志，排查问题时开启。</string>
 
-    <string name="status_connected">已连接框架</string>
-    <string name="status_connected_summary">模块已获得框架服务，设置修改会立即生效。</string>
-    <string name="status_disconnected">未连接框架服务</string>
-    <string name="status_disconnected_summary">请确认模块已在 LSPosed 中启用并授权。</string>
+    <string name="about_activated">已激活</string>
+    <string name="about_inactive">未激活</string>
+    <string name="about_inactive_hint">请在 LSPosed 中启用模块</string>
+    <string name="about_module_version">模块版本：%1$s</string>
+    <string name="about_scope_count">作用域应用</string>
+    <string name="about_enabled_count">已开启显示项</string>
     <string name="preview_title">效果预览</string>
     <string name="preview_charging">充电</string>
     <string name="preview_quick_charge">快充</string>
@@ -81,11 +87,29 @@
     <string name="about_title">关于</string>
     <string name="about_summary">HyperDuo · 仿 iPhone Duo 三合一状态栏图标</string>
 
-    <string name="info_module_version">模块版本</string>
-    <string name="info_framework">框架版本</string>
+    <string name="info_module_version">应用版本</string>
+    <string name="info_framework">Xposed 框架</string>
     <string name="info_scope">作用域</string>
     <string name="info_system_version">系统版本</string>
     <string name="info_android_version">Android 版本</string>
     <string name="info_device_model">设备型号</string>
     <string name="info_unknown">未知</string>
+
+    <string name="update_title">检查更新</string>
+    <string name="update_summary_idle">从 GitHub Releases 获取最新版本。</string>
+    <string name="update_check">检查更新</string>
+    <string name="update_checking">正在检查…</string>
+    <string name="update_uptodate">已是最新版本 %1$s</string>
+    <string name="update_available">发现新版本 %1$s</string>
+    <string name="update_available_summary">当前版本 %1$s · %2$s</string>
+    <string name="update_download">下载更新</string>
+    <string name="update_downloading">正在下载 %1$d%%</string>
+    <string name="update_ready">下载完成，点按安装</string>
+    <string name="update_ready_summary">系统会弹出安装确认，确认后生效。</string>
+    <string name="update_install">安装</string>
+    <string name="update_retry">重试</string>
+    <string name="update_failed">检查更新失败</string>
+    <string name="update_no_release">作者尚未发布任何正式版本</string>
+    <string name="update_permission_needed">需要先允许本应用安装应用，已为你打开对应设置。</string>
+    <string name="update_release_page">打开发布页面</string>
 </resources>

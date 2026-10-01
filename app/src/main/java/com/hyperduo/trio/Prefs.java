@@ -27,6 +27,8 @@ public final class Prefs {
     public static final String KEY_SHOW_VALUE = "show_value";
     public static final String KEY_SHOW_BOLT = "show_bolt";
     public static final String KEY_SHOW_MOBILE_TYPE = "show_mobile_type";
+    /** Swaps the Wi-Fi arcs and the battery reading between ring centre and notch. */
+    public static final String KEY_SWAP_WIFI_VALUE = "swap_wifi_value";
 
     public static final String KEY_ROLE_COLORS = "role_colors";
     public static final String KEY_COLOR_CRITICAL_ON_DARK = "color_critical_on_dark";
@@ -59,6 +61,14 @@ public final class Prefs {
      * gap and puts the mobile network type in the centre instead.
      */
     public static final boolean DEF_SHOW_MOBILE_TYPE = false;
+    /**
+     * Off by default: the shipped look keeps the Wi-Fi arcs in the middle of the
+     * ring. Turning this on mirrors the layout - the arcs move up into the 12
+     * o'clock notch and the battery reading (or the network type, or the enlarged
+     * charging bolt) takes the middle, drawn at
+     * {@link TrioGeometry#CENTRE_SIZE_RATIO} scale.
+     */
+    public static final boolean DEF_SWAP_WIFI_VALUE = false;
 
     public static final boolean DEF_ROLE_COLORS = true;
     public static final int DEF_COLOR_CRITICAL_ON_DARK = 0xFFFF3B30;

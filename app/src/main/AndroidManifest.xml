@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Only the settings app talks to the network, to ask GitHub for the newest
+         release. The hooked SystemUI process never gets this permission because
+         it is granted per-package, and the hooks make no network calls. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".HyperDuoApp"
         android:allowBackup="false"
@@ -46,6 +51,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity-alias>
+
+        <!-- Serves the downloaded APK to the system installer. The installer is a
+             different process, so a plain file:// path would be refused on every
+             supported Android version. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

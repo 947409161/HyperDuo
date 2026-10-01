@@ -119,20 +119,34 @@ final class TrioRenderer {
 
         final boolean wifi = wifiInk(cfg, wifiLevel);
         final boolean hasType = mobileType != null && !mobileType.isEmpty();
-        // The network type only ever claims the centre: with Wi-Fi arcs there the
-        // middle is occupied, and the type must not push the percentage out of the
-        // gap it shares with the bolt.
-        final boolean typeInCentre = cfg.showMobileType && hasType && !wifi;
-        final boolean valueInCentre = !wifi && !typeInCentre;
+        final boolean swap = cfg.swapWifiValue;
+        // The bolt is drawn by this renderer and only while the percentage is
+        // enabled, so it must be gated the same way: otherwise a ring could open
+        // its mouth for a bolt that never gets drawn.
+        final boolean bolt = charging && cfg.showBolt && cfg.showValue;
+        // Two slots, each holding one thing. Which slot a thing lands in is the
+        // whole point of the swap: the ring centre, or the 12 o'clock notch.
+        final boolean boltInCentre = bolt && swap;
+        final boolean boltInGap = bolt && !swap;
+        final boolean wifiInCentre = wifi && !swap;
+        final boolean wifiInGap = wifi && swap;
+        // The network type only ever claims the centre, and never against the
+        // bolt: a bolt at the ring centre outranks it.
+        final boolean typeInCentre = cfg.showMobileType && hasType && !wifi && !boltInCentre;
+        final boolean valueInCentre = cfg.showValue && level >= 0
+                && !typeInCentre && !wifiInCentre && !boltInCentre;
+        final boolean valueInGap = cfg.showValue && level >= 0
+                && !valueInCentre && !wifiInGap && !boltInGap;
         // The top gap is open only while something is actually drawn in it. An
         // empty mouth just breaks the ring, so it closes instead.
-        final boolean gapUsed = charging && cfg.showBolt
-                || cfg.showValue && level >= 0 && !valueInCentre;
+        final boolean gapUsed = boltInGap || wifiInGap || valueInGap;
+        // Only the bolt wants the narrower charging mouth; the digits and the
+        // arcs need all the room the idle mouth gives them.
         final float gapStart = gapUsed
-                ? (charging ? TrioGeometry.GAP_START_CHARGE : TrioGeometry.GAP_START_IDLE)
+                ? (boltInGap ? TrioGeometry.GAP_START_CHARGE : TrioGeometry.GAP_START_IDLE)
                 : TrioGeometry.GAP_NONE;
         final float gapEnd = gapUsed
-                ? (charging ? TrioGeometry.GAP_END_CHARGE : TrioGeometry.GAP_END_IDLE)
+                ? (boltInGap ? TrioGeometry.GAP_END_CHARGE : TrioGeometry.GAP_END_IDLE)
                 : TrioGeometry.GAP_NONE;
 
         final int save = canvas.save();
@@ -143,7 +157,7 @@ final class TrioRenderer {
 
         drawBattery(canvas, level, role, fg, cfg, gapStart, gapEnd);
         if (cfg.showWifi) {
-            drawWifi(canvas, wifiLevel, fg, cfg);
+            drawWifi(canvas, wifiLevel, fg, cfg, wifiInGap);
         }
         if (cfg.showMobile) {
             drawLevelDots(canvas, mobileLevel, fg, cfg);
@@ -151,8 +165,11 @@ final class TrioRenderer {
         if (typeInCentre) {
             drawCentreType(canvas, mobileType, fg, cfg);
         }
-        if (cfg.showValue) {
-            drawTopIndicator(canvas, level, charging, quickCharging, fg, cfg, valueInCentre);
+        if (bolt) {
+            drawBolt(canvas, quickCharging ? TrioGeometry.QUICK_CHARGE : fg, boltInCentre);
+        }
+        if (valueInCentre || valueInGap) {
+            drawValue(canvas, level, fg, cfg, valueInCentre);
         }
 
         canvas.restoreToCount(save);
@@ -233,7 +250,18 @@ final class TrioRenderer {
 
     // -------------------------------------------------------------------- wifi
 
-    private static void drawWifi(Canvas c, int level, int fg, TrioSettings cfg) {
+    /**
+     * @param gap {@code true} when the swap setting has moved the arcs up into
+     *   the 12 o'clock notch. The whole group is then translated and scaled on
+     *   the canvas, which keeps one set of reference coordinates for both slots -
+     *   the same trick the bolt uses.
+     */
+    private static void drawWifi(Canvas c, int level, int fg, TrioSettings cfg, boolean gap) {
+        final int save = gap ? c.save() : 0;
+        if (gap) {
+            c.translate(TrioGeometry.gapWifiOffsetX(), TrioGeometry.gapWifiOffsetY(cfg.arcStroke));
+            c.scale(TrioGeometry.GAP_WIFI_SCALE, TrioGeometry.GAP_WIFI_SCALE);
+        }
         STROKE.setStrokeWidth(cfg.arcStroke);
         STROKE.setColor(fg);
         if (level >= 3) {
@@ -248,6 +276,9 @@ final class TrioRenderer {
         if (level >= 1) {
             FILL.setColor(fg);
             c.drawPath(WIFI_DOT, FILL);
+        }
+        if (gap) {
+            c.restoreToCount(save);
         }
     }
 
@@ -297,24 +328,7 @@ final class TrioRenderer {
      *   (the Wi-Fi arcs and the network type are both absent), {@code false} to
      *   keep it in the 12 o'clock gap next to the charging bolt.
      */
-    private static void drawTopIndicator(Canvas c, int level, boolean charging,
-                                         boolean quickCharging, int fg,
-                                         TrioSettings cfg, boolean centre) {
-        final boolean bolt = charging && cfg.showBolt;
-        if (bolt) {
-            // Quick charge is told apart by hue alone. Adding glyphs was tried and
-            // rejected: at the real 60px status-bar size a second bolt merges with
-            // the first into an unreadable blob.
-            drawBolt(c, quickCharging ? TrioGeometry.QUICK_CHARGE : fg);
-        }
-        if (level < 0) {
-            return;
-        }
-        // The bolt owns the gap, so a value that would share it steps aside; a
-        // centred value has room of its own and is drawn alongside it.
-        if (bolt && !centre) {
-            return;
-        }
+    private static void drawValue(Canvas c, int level, int fg, TrioSettings cfg, boolean centre) {
         final String text = String.valueOf(level);
         final float requested = centre ? TrioGeometry.centreSize(cfg.valueSize) : cfg.valueSize;
         final float clear = centre ? TrioGeometry.centreClearWidth(requested, cfg.ringStroke)
@@ -353,11 +367,19 @@ final class TrioRenderer {
      * coordinates stay readable, and it is saved/restored so nothing else moves.
      *
      * @param color bolt fill; amber while the battery reports quick charge.
+     * @param centre {@code true} to fill the middle of the ring (the swap
+     *   setting, and while charging there), {@code false} to sit in the
+     *   12 o'clock gap at the size the reference path implies.
      */
-    private static void drawBolt(Canvas c, int color) {
+    private static void drawBolt(Canvas c, int color, boolean centre) {
         final int save = c.save();
-        c.translate(TrioGeometry.boltOffsetX(), TrioGeometry.boltOffsetY());
-        c.scale(TrioGeometry.BOLT_SCALE, TrioGeometry.BOLT_SCALE);
+        if (centre) {
+            c.translate(TrioGeometry.boltCentreOffsetX(), TrioGeometry.boltCentreOffsetY());
+            c.scale(TrioGeometry.BOLT_CENTRE_SCALE, TrioGeometry.BOLT_CENTRE_SCALE);
+        } else {
+            c.translate(TrioGeometry.boltOffsetX(), TrioGeometry.boltOffsetY());
+            c.scale(TrioGeometry.BOLT_SCALE, TrioGeometry.BOLT_SCALE);
+        }
         FILL.setColor(color);
         c.drawPath(BOLT, FILL);
         c.restoreToCount(save);

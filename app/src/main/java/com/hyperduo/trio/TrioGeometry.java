@@ -88,6 +88,23 @@ final class TrioGeometry {
         return BOLT_TOP - BOLT_TOP_REF * BOLT_SCALE;
     }
 
+    /** Vertical middle of the reference bolt, used to centre it in the ring. */
+    static final float BOLT_MID_REF = 11.9f;
+    /**
+     * Bolt scale for the swapped layout, where the bolt no longer shares the
+     * notch with anything and can fill the ring. Matches the mass of the
+     * percentage drawn at {@link #centreSize} for the default value size.
+     */
+    static final float BOLT_CENTRE_SCALE = 2.6f;
+
+    static float boltCentreOffsetX() {
+        return BOLT_CX - BOLT_CX_REF * BOLT_CENTRE_SCALE;
+    }
+
+    static float boltCentreOffsetY() {
+        return CENTER_CY - BOLT_MID_REF * BOLT_CENTRE_SCALE;
+    }
+
     // ------------------------------------------------------------------- value
     static final float VALUE_X = 59.5f;
     static final float VALUE_BASELINE = 24f;
@@ -191,6 +208,30 @@ final class TrioGeometry {
     static final float W2_R = 18.5f;
     static final float W2_START = 227.5048f;
     static final float W2_SWEEP = 84.9904f;
+
+    /** Topmost ink of the outer arc, at its apex. */
+    static final float W_TOP = W1_CY - W1_R;
+    /**
+     * Scale of the Wi-Fi group when {@code Prefs.KEY_SWAP_WIFI_VALUE} moves it
+     * into the 12 o'clock notch. The notch is 69.6 units of chord at the mouth
+     * and the group is 49 wide at full size, so it has to shrink to read as a
+     * notch ornament rather than spill over the arc ends.
+     */
+    static final float GAP_WIFI_SCALE = 0.8f;
+
+    /** Keeps the group horizontally centred on the icon axis. */
+    static float gapWifiOffsetX() {
+        return W_CX * (1f - GAP_WIFI_SCALE);
+    }
+
+    /**
+     * Puts the topmost ink - the outer arc's apex, half a stroke above its
+     * centre line - at {@link #GAP_TOP}, the same clearance the digits get when
+     * they sit in the notch.
+     */
+    static float gapWifiOffsetY(float stroke) {
+        return GAP_TOP - (W_TOP - stroke * 0.5f) * GAP_WIFI_SCALE;
+    }
 
     // ------------------------------------------------------- four level dots
     static final float DOT_R = 5.5f;

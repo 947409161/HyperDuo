@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Release CI derives both numbers from the pushed tag and passes them in, so the
+// version in the APK, the version in the About card and the version the updater
+// compares against are all the same value. A local build falls back to the
+// checked-in defaults below.
+val tagVersionName = (findProperty("hyperduoVersionName") as String?)?.takeIf { it.isNotBlank() }
+val tagVersionCode = (findProperty("hyperduoVersionCode") as String?)?.toIntOrNull()
+
 android {
     namespace = "com.hyperduo.trio"
     compileSdk = 37
@@ -11,8 +18,8 @@ android {
         applicationId = "com.hyperduo.trio"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = tagVersionCode ?: 2
+        versionName = tagVersionName ?: "1.1"
     }
 
     signingConfigs {
@@ -77,6 +84,9 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.activity:activity-compose:1.13.0")
+    // The updater does its network work off the main thread and reports state
+    // back on it; Compose alone has no scheduling primitive for that.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.3")
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.3")

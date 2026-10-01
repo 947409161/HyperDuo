@@ -46,6 +46,7 @@ class SettingsRepository(context: Context) {
     fun setShowValue(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_VALUE, value)
     fun setShowBolt(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_BOLT, value)
     fun setShowMobileType(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_MOBILE_TYPE, value)
+    fun setSwapWifiValue(value: Boolean) = writeBoolean(Prefs.KEY_SWAP_WIFI_VALUE, value)
 
     // ----------------------------------------------------------------- colours
 
@@ -111,6 +112,7 @@ class SettingsRepository(context: Context) {
             prefs.putBoolean(Prefs.KEY_SHOW_VALUE, snapshot.showValue)
             prefs.putBoolean(Prefs.KEY_SHOW_BOLT, snapshot.showBolt)
             prefs.putBoolean(Prefs.KEY_SHOW_MOBILE_TYPE, snapshot.showMobileType)
+            prefs.putBoolean(Prefs.KEY_SWAP_WIFI_VALUE, snapshot.swapWifiValue)
 
             prefs.putBoolean(Prefs.KEY_ROLE_COLORS, snapshot.roleColors)
             prefs.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, snapshot.criticalOnDark)

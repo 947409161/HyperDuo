@@ -7,7 +7,7 @@
 | 项 | 值 |
 | --- | --- |
 | `namespace` / `applicationId` | `com.hyperduo.trio` |
-| `versionCode` / `versionName` | 2 / 1.1 |
+| `versionCode` / `versionName` | 本地 2 / 1.1；发布时由 CI 按 tag 注入（见「发布流水线」） |
 | `minSdk` / `targetSdk` / `compileSdk` | 29 / 36 / 37 |
 | Java | 17 |
 | 框架接口 | libxposed **API 102**（`minApiVersion=102`、`targetApiVersion=102`、`staticScope=true`） |
@@ -18,7 +18,9 @@
 分类（LSPosed 管理器里点击模块进入），`.ui.MainActivityAlias` 是桌面 LAUNCHER 图标。
 
 依赖：`compileOnly io.github.libxposed:api:102.0.0`、`implementation io.github.libxposed:service:102.0.0`、
-`androidx.core:core-ktx:1.19.0`、`androidx.activity:activity-compose:1.13.0`、Miuix 0.9.3
+`androidx.core:core-ktx:1.19.0`、`androidx.activity:activity-compose:1.13.0`、
+`org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0`（更新器要在主线程外做网络、
+回到主线程报状态，Compose 本身没有调度原语）、Miuix 0.9.3
 （`miuix-ui-android` / `miuix-preference-android` / `miuix-icons-android`）。
 
 ## 源码结构
@@ -38,8 +40,9 @@ com.hyperduo.trio
 ├─ Refl.java             反射小工具
 └─ ui\
    ├─ MainActivity.kt         ComponentActivity + MiuixTheme
-   ├─ SettingsScreen.kt       全部设置项 + 预览卡片 + 颜色弹窗
-   └─ SettingsRepository.kt   读写本地 prefs 并写穿到 remote preferences
+   ├─ SettingsScreen.kt       全部设置项 + 预览卡片 + 颜色弹窗 + 更新卡片
+   ├─ SettingsRepository.kt   读写本地 prefs 并写穿到 remote preferences
+   └─ UpdateController.kt     检查 / 下载 / 调起安装器（GitHub Releases）
 ```
 
 ## 构建
@@ -69,12 +72,51 @@ $env:ANDROID_HOME="$T\sdk"
   `org.gradle.configuration-cache=false`、`org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8`。
 - 手写的 `build.ps1`（javac/d8/aapt2 离线管线）**已弃用**，保留仅供查阅：它无法编译
   Kotlin/Compose 与 `res/`，这正是迁移到 Gradle 的原因。
+- 本仓库**没有 Gradle wrapper**（工具链是 vendored 的），本地用 `.tools\gradle\gradle-9.8.0`，
+  CI 用 `gradle/actions/setup-gradle` 提供同一个版本。
+
+### 发布构建
+
+```powershell
+& "$T\gradle\gradle-9.8.0\bin\gradle.bat" --project-dir C:\code\HyperDuo :app:assembleRelease `
+  -PhyperduoVersionName=1.2 -PhyperduoVersionCode=10200 --no-daemon --console=plain
+```
+
+`app\build.gradle.kts` 顶部读取 `hyperduoVersionName` / `hyperduoVersionCode` 两个 project
+property，缺省时回落到 `1.1` / `2`。**发布构建不能加 `--offline`**：R8 需要一个未 vendored 的
+`org.jetbrains.kotlin:compose-group-mapping`，离线会以
+`Execution failed for task ':app:produceReleaseComposeMapping'` 失败。
+
+release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro` 里
+`-keep class com.hyperduo.trio.** { *; }` 保证了 hook 侧与更新器都不被剥离 —— 这是必须的，
+因为 hook 类由框架按 `java_init.list` 反射实例化，R8 看不到这条引用。
 
 ### 签名
 
 `signingConfigs.create("hyperduo")` 使用 `rootProject.file(".tools/debug.keystore")`，
 `storePassword` / `keyPassword` 均为 `android`，`keyAlias` 为 `hyperduo`。debug 与 release
 共用同一个签名，目的是让就地升级覆盖已安装的模块时能继续保持模块授权。
+
+`.tools/debug.keystore` **是入库的**（`.gitignore` 显式放行），因此 CI 不需要任何 secret 就能
+产出与本地、与应用内更新互相覆盖的 APK。
+
+### 发布流水线
+
+`.github/workflows/release.yml`：**push 一个 `v*` tag 就是唯一的发布动作**。
+
+- 触发：`push: tags: ['v*']`；也支持 `workflow_dispatch` 干跑（只上传 workflow artifact，
+  不建 Release）。
+- 版本号从 tag 推导：`v1.2.3` → `versionName=1.2.3`、`versionCode=1*10000+2*100+3`。tag 不是
+  `v<major>.<minor>.<patch>` 时直接报错退出，避免产出版本号不可比的包。
+- 用 `-PhyperduoVersionName/-PhyperduoVersionCode` 注入，所以 APK 里的版本、关于页显示的版本
+  与更新器比对用的版本永远是同一个值。
+- 构建后把 `app-release.apk` 复制成 `dist/HyperDuo-<version>.apk` 再上传。**文件名是契约的一部分**：
+  更新器取 Release 的第一个 `.apk` asset，这个名字就是设备上的下载文件名。
+- 只在 tag 触发时创建 Release（`softprops/action-gh-release`，`fail_on_unmatched_files: true`）。
+  `/releases/latest` 会返回这个 Release，App 内「检查更新」据此比对。
+
+**为什么只有 tag 能发布**：应用内更新器读的是 `/releases/latest`。如果一个 Release 存在却没有
+APK asset，用户会看到一个装不上的「新版本」。所以流水线宁可失败也不发空 Release。
 
 ### 安装与观测
 
@@ -95,7 +137,7 @@ adb shell am start -n com.hyperduo.trio/.ui.MainActivity
 
 日志 tag 是 **`LSPosedFramework`**（框架代打的），**不是** `HyperDuo`；行形如
 `(com.android.systemui)[com.hyperduo.trio,HyperDuo,<id>,0,1] <msg>`。启动时会打印一行
-`HyperDuo installed, hooks=8`；固件改了方法名时会打 `skip <id>: method not found`。
+`HyperDuo installed, hooks=9`；固件改了方法名时会打 `skip <id>: method not found`。
 
 需要重新定位某个容器时，把 `TrioHooks.DEBUG_DUMP` 改成 `true` 再构建，即可打印容器的屏幕
 坐标、尺寸与全部子视图（含 slot / 宽高 / alpha / visibility）。
@@ -103,13 +145,14 @@ adb shell am start -n com.hyperduo.trio/.ui.MainActivity
 ## 配置通道
 
 设置走 libxposed 的 remote preferences，组名 / 文件名同为 `Prefs.NAME = "hyperduo_settings"`；
-键与默认值集中在 `Prefs.java`，上下界也在那里（共 18 个键）。
+键与默认值集中在 `Prefs.java`，上下界也在那里（共 21 个键）。
 
 - **写侧**（设置 App）：`HyperDuoApp.onServiceBind` 拿到 `XposedService`，之后每次改动都
   `getRemotePreferences(NAME).edit().putX(...).commit()`，并把同一份写进本应用的
   `SharedPreferences`（即 `shared_prefs\hyperduo_settings.xml`）。服务是异步绑定、也可能随时
   死亡，所以 `SettingsRepository` 每次写入都实时取 `HyperDuoApp.xposedService`，**不缓存
-  service**；绑定成功时还会 `syncAllToFramework()` 全量重放 18 个键，补齐框架缺席期间的改动。
+  service**；绑定成功时还会 `syncAllToFramework()` 全量重放 21 个键，补齐框架缺席期间的改动。
+  **每新增一个键都必须同时加到 `syncAllToFramework()`**，否则该键在框架重连后不会下发。
 - **读侧**（hook 进程）：remote `SharedPreferences` 是**只读**的，但支持
   `registerOnSharedPreferenceChangeListener`，框架会实时投递变更。`TrioConfig` 注册一个监听器，
   每次回调重新读成一份 `TrioSettings` 快照并 `invalidateHosts()` 重绘宿主 ⇒ **改设置不需要
@@ -135,9 +178,28 @@ Miuix 的 `MiuixPopupHost` 从 `LocalRootDialogStates` / `LocalDialogStates` 读
 ### 几何
 
 120×120 设计空间，常量集中在 `TrioGeometry.java`。电池环圆心 `(59.5, 61.487)`、半径 51.5、
-描边 8、起始角 148.69°、扫过 242.62°（缺口在**底部**）；顶部缺口留给数字（进度 0.353–0.647）
-或闪电（0.385–0.614）。Wi-Fi 半径 31 / 18.5，描边 7，等级 0–3；点阵 4 颗半径 5.5，等级 0–4。
-环线粗细 / 弧线粗细 / 数字字号 / 轨道透明度由 `TrioSettings` 覆盖，未改动时可复现上面这些原始值。
+描边 8、起始角 148.69°、扫过 242.62°（缺口在**底部**）；顶部缺口留给数字（进度 0.325–0.675）
+或闪电（0.345–0.655，比数字缺口**更窄**）。Wi-Fi 半径 31 / 18.5，描边 7，等级 0–3；点阵 4 颗
+半径 5.5，等级 0–4。环线粗细 / 弧线粗细 / 数字字号 / 轨道透明度由 `TrioSettings` 覆盖，未改动
+时可复现上面这些原始值。
+
+缺口是**有内容才开**的：`gapStart == gapEnd == 0`（`GAP_NONE`）时 `batteryRing` 的两段会合并成
+一整圈。判断顶部缺口是否被占用，以及谁占圆心，都在 `TrioRenderer.drawInto` 的决策块里
+（`TrioRenderer.java:118` 起）；圆心与缺口的字号、基线、清空宽度分别由
+`TrioGeometry.centreSize/centerBaseline/centreClearWidth` 与 `gapBaseline/gapClearWidth` 给出。
+
+### Wi-Fi 与数字换位
+
+`swap_wifi_value` 打开后，`drawInto` 的两个「槽位」互换：
+
+| | 关（默认） | 开 |
+| --- | --- | --- |
+| 圆心 | Wi-Fi 弧 | 电量数字（放大 `CENTRE_SIZE_RATIO` 倍）/ 网络类型 / 充电闪电 |
+| 顶部缺口 | 电量数字 / 闪电 | Wi-Fi 弧（缩小到 `GAP_WIFI_SCALE`） |
+
+Wi-Fi 搬进缺口是靠 canvas 变换（`translate` + `scale`）完成的，几何常量仍是原始那套绝对值；
+闪电居中同理（`boltCentreOffsetX/Y` + `BOLT_CENTRE_SCALE`）。两者都在 `save()`/`restoreToCount()`
+里做变换，和 `drawBolt` 的既有写法一致。
 
 ### 配色
 
@@ -220,9 +282,15 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 | `hyperduo-charge-text` | `MiuiBatteryMeterView.updateChargeAndText` | 隐藏原生充电/百分比视图 |
 | `hyperduo-cutout` | `MiuiPhoneStatusBarView.updateCutoutLocation` | 重新追加被 `setIgnoredSlots` 清掉的 slot |
 | `hyperduo-signal` | `MiuiStatusBarIconViewHelper.transformResId` | 读取 Wi-Fi / 移动信号等级并触发重绘 |
+| `hyperduo-mobile-type` | `MobileTypeDrawable.measure` | 读 `mMobileType`（网络类型 3G/4G/5G…）并触发重绘 |
 
-共 8 个 hook。每个 hook 组独立容错：固件重命名某个方法只会让该组打日志跳过，不影响其余。
+共 9 个 hook。每个 hook 组独立容错：固件重命名某个方法只会让该组打日志跳过，不影响其余。
 设置通道不占 hook —— `TrioConfig` 是注册在 remote `SharedPreferences` 上的变更监听器。
+
+`hyperduo-mobile-type` 必须在 `chain.proceed()` **之后**再读字段：`measure()` 会把 `"5G++"`
+就地改写成 `"5G"` 并另置一个 double-plus 标志（`MobileTypeDrawable.java:69`），提前读会拿到
+未规范化的原值。网络类型绝不自行推断 —— `5GA` 是 MIUI 按运营商配置
+（`OperatorConfig.support5GADisplay`）决定的，模块只如实显示系统给的字符串。
 
 ## 配置项参考
 
@@ -233,6 +301,7 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 | `enabled` | `true` | — |
 | `show_wifi` / `show_mobile` / `show_value` / `show_bolt` | `true` | — |
 | `show_mobile_type` | `false` | — |
+| `swap_wifi_value` | `false` | — |
 | `role_colors` | `true` | — |
 | `color_critical_on_dark` / `color_critical_on_light` | `0xFFFF3B30` | — |
 | `color_charging_on_dark` / `color_charging_on_light` | `0xFF34C759` / `0xFF1F8F3D` | — |
@@ -269,7 +338,9 @@ app\build.gradle.kts                   Gradle 模块配置（namespace com.hyper
 app\src\main\java\com\hyperduo\trio\   hook 源码（Java）
 app\src\main\java\com\hyperduo\trio\ui\ 设置界面（Kotlin + Compose + Miuix）
 app\src\main\res\                      strings / themes / 图标
+app\src\main\res\xml\file_paths.xml    FileProvider 路径（更新器下载目录）
 app\src\main\resources\META-INF\xposed\  java_init.list / scope.list / module.prop
+.github\workflows\release.yml          tag 触发的发布流水线
 docs\                                  开发文档与 README 配图
 build.gradle.kts / settings.gradle.kts / gradle.properties   构建配置
 install.ps1                            安装 + 打开设置 + 日志
@@ -277,15 +348,36 @@ build.ps1                              旧离线构建（已弃用，保留查�
 work\jadx-out\                         MiuiSystemUI 反编译源（分析用，不入库）
 work\unpacked\                         MiuiSystemUI 解包资源（分析用，不入库）
 work\geocheck\                         离线段渲染与解析校验（不入库）
+work\preview\                          离线 JVM 预览工装（不入库）
 .tools\                                JDK / Gradle / SDK / 本地 Maven 仓库
 .ref\                                  参考模块与 libxposed 源码（分析用，不入库）
 ```
+
+## 测试
+
+仓库**目前没有任何自动化测试**（`app\src` 下只有 `main`，没有 `test` / `androidTest` source set）。
+回归验证靠两条手工通道：
+
+1. **离线 JVM 预览**（`work\preview\`，不入库）：一套只服务工装的 `android.*` 桌面垫片 + 入口
+   `PreviewMain`，直接编译 `Prefs.java` / `TrioSettings.java` / `TrioGeometry.java` /
+   `TrioRenderer.java` 出图，不需要设备就能看几何。工装内嵌的 `SharedPreferences` 替身**必须叫
+   `FakePrefs`** —— 叫 `Prefs` 会遮蔽真正的 `com.hyperduo.trio.Prefs`，导致常量解析失败。
+   垫片出图与真机不符时，**先怀疑垫片**（历史上 `Canvas.restoreToCount` 的语义错实现过一次，
+   症状是画布变换泄漏到后续所有绘制）。
+2. **上机验证**：`install.ps1` 装机后重启 SystemUI，看日志与状态栏实拍。
 
 ## 验证记录
 
 - 几何离线校验（渲染）：`work\geocheck\geocheck.png` 通过。
 - 信号名解析校验：112 个资源名逐条判定正确。
-- 上机（小米 14 / HyperOS 4）：8 个 hook 全部安装（日志 `HyperDuo installed, hooks=8`），无
+- 上机（小米 14 / HyperOS 4）：9 个 hook 全部安装（日志 `HyperDuo installed, hooks=9`），无
   `AndroidRuntime:E`；状态栏 / 锁屏 / 控制中心的原生 Wi-Fi、移动（含 `stacked_mobile`）、电池
   图标均被抑制；屏幕中央不再残留游离的「5G」；Wi-Fi 关闭时不画弧；深色背景下前景色取样正确；
   切换设置不重启 SystemUI 即生效。
+- 换位开关（`swap_wifi_value`）上机双向验证：关机位为「小闪电在顶部缺口 + 数字在圆心」，开机位
+  为「大闪电居中 + 数字缩到顶部缺口」，开 Wi-Fi 时 Wi-Fi 弧缩进缺口；切换即时生效，无需重启。
+- 更新器上机验证：无 Release 时点「检查更新」显示「作者尚未发布任何正式版本」（404 视为正常
+  空答案而非失败），界面不卡死、不误报。
+- release 构建注入验证：`-PhyperduoVersionName=1.2 -PhyperduoVersionCode=10200` 产出的 APK
+  经 `aapt2 dump badging` 确认 `versionCode='10200' versionName='1.2'`；解包后 `dexdump` 确认
+  hook 侧与更新器全部类均未被 R8 剥离。

@@ -23,6 +23,12 @@ public final class TrioSettings {
     public boolean showValue;
     public boolean showBolt;
     public boolean showMobileType;
+    /**
+     * Swaps the two slots: the Wi-Fi arcs move up into the 12 o'clock notch and
+     * the battery reading takes the middle of the ring, enlarged. While charging
+     * the bolt owns the middle and the arcs stay in the notch.
+     */
+    public boolean swapWifiValue;
 
     public boolean roleColors;
     public int criticalOnDark;
@@ -58,6 +64,7 @@ public final class TrioSettings {
         s.showValue = Prefs.DEF_SHOW_VALUE;
         s.showBolt = Prefs.DEF_SHOW_BOLT;
         s.showMobileType = Prefs.DEF_SHOW_MOBILE_TYPE;
+        s.swapWifiValue = Prefs.DEF_SWAP_WIFI_VALUE;
 
         s.roleColors = Prefs.DEF_ROLE_COLORS;
         s.criticalOnDark = Prefs.DEF_COLOR_CRITICAL_ON_DARK;
@@ -91,6 +98,7 @@ public final class TrioSettings {
         s.showValue = p.getBoolean(Prefs.KEY_SHOW_VALUE, Prefs.DEF_SHOW_VALUE);
         s.showBolt = p.getBoolean(Prefs.KEY_SHOW_BOLT, Prefs.DEF_SHOW_BOLT);
         s.showMobileType = p.getBoolean(Prefs.KEY_SHOW_MOBILE_TYPE, Prefs.DEF_SHOW_MOBILE_TYPE);
+        s.swapWifiValue = p.getBoolean(Prefs.KEY_SWAP_WIFI_VALUE, Prefs.DEF_SWAP_WIFI_VALUE);
 
         s.roleColors = p.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = p.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);

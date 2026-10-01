@@ -6,7 +6,8 @@
     <string name="group_appearance">Appearance</string>
     <string name="group_geometry">Geometry</string>
     <string name="group_colors">Colors</string>
-    <string name="group_advanced">Advanced</string>
+
+    <string name="tab_general">General</string>
 
     <string name="master_title">Enable trio icon</string>
     <string name="master_summary">Master switch. Turn off to restore the stock battery and signal icons.</string>
@@ -25,6 +26,9 @@
 
     <string name="show_mobile_type_title">Show network type</string>
     <string name="show_mobile_type_summary">With no Wi-Fi, show 3G/4G/5G in the middle of the ring and move the battery number back to the top.</string>
+
+    <string name="swap_wifi_value_title">Swap Wi-Fi and number</string>
+    <string name="swap_wifi_value_summary">Enlarge the percentage into the middle of the ring and shrink the Wi-Fi arcs into the top notch; while charging the big bolt takes the middle.</string>
 
     <string name="color_role_title">State colors</string>
     <string name="color_role_summary">Pick colors for low battery, charging and critical battery.</string>
@@ -67,10 +71,12 @@
     <string name="debug_title">Debug log</string>
     <string name="debug_summary">Write verbose output to the LSPosed log. Enable only when diagnosing.</string>
 
-    <string name="status_connected">Framework connected</string>
-    <string name="status_connected_summary">The framework service is available; changes apply immediately.</string>
-    <string name="status_disconnected">Framework service unavailable</string>
-    <string name="status_disconnected_summary">Make sure the module is enabled and authorized in LSPosed.</string>
+    <string name="about_activated">Activated</string>
+    <string name="about_inactive">Inactive</string>
+    <string name="about_inactive_hint">Enable the module in LSPosed</string>
+    <string name="about_module_version">Module version: %1$s</string>
+    <string name="about_scope_count">Scoped apps</string>
+    <string name="about_enabled_count">Enabled toggles</string>
     <string name="preview_title">Preview</string>
     <string name="preview_charging">Charging</string>
     <string name="preview_quick_charge">Fast</string>
@@ -81,11 +87,29 @@
     <string name="about_title">About</string>
     <string name="about_summary">HyperDuo · an iPhone-Duo style trio status bar icon</string>
 
-    <string name="info_module_version">Module version</string>
-    <string name="info_framework">Framework version</string>
+    <string name="info_module_version">App version</string>
+    <string name="info_framework">Xposed framework</string>
     <string name="info_scope">Scope</string>
     <string name="info_system_version">System version</string>
     <string name="info_android_version">Android version</string>
     <string name="info_device_model">Device model</string>
     <string name="info_unknown">Unknown</string>
+
+    <string name="update_title">Check for updates</string>
+    <string name="update_summary_idle">Fetches the newest release from GitHub.</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_checking">Checking…</string>
+    <string name="update_uptodate">Up to date — %1$s</string>
+    <string name="update_available">Version %1$s is available</string>
+    <string name="update_available_summary">Installed %1$s · %2$s</string>
+    <string name="update_download">Download</string>
+    <string name="update_downloading">Downloading %1$d%%</string>
+    <string name="update_ready">Downloaded — tap to install</string>
+    <string name="update_ready_summary">Android will ask you to confirm before installing.</string>
+    <string name="update_install">Install</string>
+    <string name="update_retry">Retry</string>
+    <string name="update_failed">Could not check for updates</string>
+    <string name="update_no_release">No release has been published yet</string>
+    <string name="update_permission_needed">HyperDuo needs permission to install apps; the settings page has been opened for you.</string>
+    <string name="update_release_page">Open release page</string>
 </resources>
