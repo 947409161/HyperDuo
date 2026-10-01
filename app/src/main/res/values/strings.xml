@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HyperDuo</string>
+    <string name="xposed_description">把状态栏的 Wi-Fi、移动信号与电池合并为一个仿 iPhone Duo 的三合一体图标。</string>
+
+    <string name="group_appearance">外观</string>
+    <string name="group_geometry">尺寸</string>
+    <string name="group_colors">颜色</string>
+    <string name="group_advanced">高级</string>
+
+    <string name="master_title">启用三合一图标</string>
+    <string name="master_summary">总开关。关闭后恢复系统原本的电池与信号图标。</string>
+
+    <string name="show_wifi_title">显示 Wi-Fi 弧</string>
+    <string name="show_wifi_summary">在最外层绘制 Wi-Fi 弧线，弧数跟随实际信号强度。</string>
+
+    <string name="show_mobile_title">显示移动信号点</string>
+    <string name="show_mobile_summary">在底部绘制四个电平点表示移动网络信号强度。</string>
+
+    <string name="show_value_title">显示电量数字</string>
+    <string name="show_value_summary">在环内显示电量百分比；充电时改为闪电图标。</string>
+
+    <string name="show_bolt_title">充电时显示闪电</string>
+    <string name="show_bolt_summary">关闭后充电时仍显示电量数字。</string>
+
+    <string name="show_mobile_type_title">显示网络类型</string>
+    <string name="show_mobile_type_summary">无 Wi-Fi 时在圆环中间显示 3G/4G/5G 等网络类型，电量数字回到顶部。</string>
+
+    <string name="color_role_title">状态颜色</string>
+    <string name="color_role_summary">分别为低电量、充电与危险电量指定颜色。</string>
+
+    <string name="color_low_title">低电量颜色</string>
+    <string name="color_charging_title">充电颜色</string>
+    <string name="color_critical_title">危险电量颜色</string>
+    <string name="color_field_summary">点按选择颜色</string>
+    <string name="color_on_dark">深色背景</string>
+    <string name="color_on_light">浅色背景</string>
+    <string name="color_dialog_summary">分别设置状态栏为深色与浅色背景时使用的颜色。</string>
+    <string name="color_reset">恢复默认</string>
+    <string name="color_reset_summary">把三种状态颜色恢复为出厂预设。</string>
+    <string name="color_preview">预览</string>
+
+    <string name="low_threshold_title">低电量阈值</string>
+    <string name="low_threshold_summary">电量低于该值时切换到低电量颜色。</string>
+
+    <string name="stroke_title">环线粗细</string>
+    <string name="stroke_summary">电池圆环的描边宽度。</string>
+
+    <string name="arc_stroke_title">弧线粗细</string>
+    <string name="arc_stroke_summary">Wi-Fi 弧线的描边宽度。</string>
+
+    <string name="value_size_title">数字字号</string>
+    <string name="value_size_summary">电量百分比文字的尺寸。</string>
+
+    <string name="value_weight_title">数字字重</string>
+    <string name="value_weight_summary">电量数字的笔画粗细，100 最细、900 最粗。</string>
+
+    <string name="type_size_title">网络类型字号</string>
+    <string name="type_size_summary">圆环中间 3G/4G/5G 等文字的大小。</string>
+
+    <string name="type_weight_title">网络类型字重</string>
+    <string name="type_weight_summary">网络类型的笔画粗细，100 最细、900 最粗。</string>
+
+    <string name="track_alpha_title">底纹浓度</string>
+    <string name="track_alpha_summary">未点亮部分的透明度。</string>
+
+    <string name="debug_title">调试日志</string>
+    <string name="debug_summary">把详细过程写入 LSPosed 日志，排查问题时开启。</string>
+
+    <string name="status_connected">已连接框架</string>
+    <string name="status_connected_summary">模块已获得框架服务，设置修改会立即生效。</string>
+    <string name="status_disconnected">未连接框架服务</string>
+    <string name="status_disconnected_summary">请确认模块已在 LSPosed 中启用并授权。</string>
+    <string name="preview_title">效果预览</string>
+    <string name="preview_charging">充电</string>
+    <string name="preview_quick_charge">快充</string>
+    <string name="preview_normal">正常</string>
+    <string name="preview_no_wifi">无 Wi-Fi</string>
+    <string name="preview_low">省电</string>
+    <string name="preview_critical">危险</string>
+    <string name="about_title">关于</string>
+    <string name="about_summary">HyperDuo · 仿 iPhone Duo 三合一状态栏图标</string>
+
+    <string name="info_module_version">模块版本</string>
+    <string name="info_framework">框架版本</string>
+    <string name="info_scope">作用域</string>
+    <string name="info_system_version">系统版本</string>
+    <string name="info_android_version">Android 版本</string>
+    <string name="info_device_model">设备型号</string>
+    <string name="info_unknown">未知</string>
+</resources>
