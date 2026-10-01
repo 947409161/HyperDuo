@@ -7,7 +7,7 @@
 | 项 | 值 |
 | --- | --- |
 | `namespace` / `applicationId` | `com.hyperduo.trio` |
-| `versionCode` / `versionName` | 本地 2 / 1.1；发布时由 CI 按 tag 注入（见「发布流水线」） |
+| `versionCode` / `versionName` | 源码里 2 / 1.1；发布时由 `release.ps1 -Version` 注入（见「发布流水线」） |
 | `minSdk` / `targetSdk` / `compileSdk` | 29 / 36 / 37 |
 | Java | 17 |
 | 框架接口 | libxposed **API 102**（`minApiVersion=102`、`targetApiVersion=102`、`staticScope=true`） |
@@ -72,8 +72,7 @@ $env:ANDROID_HOME="$T\sdk"
   `org.gradle.configuration-cache=false`、`org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8`。
 - 手写的 `build.ps1`（javac/d8/aapt2 离线管线）**已弃用**，保留仅供查阅：它无法编译
   Kotlin/Compose 与 `res/`，这正是迁移到 Gradle 的原因。
-- 本仓库**没有 Gradle wrapper**（工具链是 vendored 的），本地用 `.tools\gradle\gradle-9.8.0`，
-  CI 用 `gradle/actions/setup-gradle` 提供同一个版本。
+- 本仓库**没有 Gradle wrapper**（工具链是 vendored 的），本地用 `.tools\gradle\gradle-9.8.0`。
 
 ### 发布构建
 
@@ -97,26 +96,43 @@ release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro
 `storePassword` / `keyPassword` 均为 `android`，`keyAlias` 为 `hyperduo`。debug 与 release
 共用同一个签名，目的是让就地升级覆盖已安装的模块时能继续保持模块授权。
 
-`.tools/debug.keystore` **是入库的**（`.gitignore` 显式放行），因此 CI 不需要任何 secret 就能
-产出与本地、与应用内更新互相覆盖的 APK。
+`.tools/debug.keystore` **是入库的**（`.gitignore` 显式放行），因此发布不需要任何 secret 就能
+产出与本地 debug 包、与应用内更新互相覆盖的 APK。
 
 ### 发布流水线
 
-`.github/workflows/release.yml`：**push 一个 `v*` tag 就是唯一的发布动作**。
+发布是**一条本地命令**，没有 CI：
 
-- 触发：`push: tags: ['v*']`；也支持 `workflow_dispatch` 干跑（只上传 workflow artifact，
-  不建 Release）。
-- 版本号从 tag 推导：`v1.2.3` → `versionName=1.2.3`、`versionCode=1*10000+2*100+3`。tag 不是
-  `v<major>.<minor>.<patch>` 时直接报错退出，避免产出版本号不可比的包。
-- 用 `-PhyperduoVersionName/-PhyperduoVersionCode` 注入，所以 APK 里的版本、关于页显示的版本
-  与更新器比对用的版本永远是同一个值。
-- 构建后把 `app-release.apk` 复制成 `dist/HyperDuo-<version>.apk` 再上传。**文件名是契约的一部分**：
-  更新器取 Release 的第一个 `.apk` asset，这个名字就是设备上的下载文件名。
-- 只在 tag 触发时创建 Release（`softprops/action-gh-release`，`fail_on_unmatched_files: true`）。
-  `/releases/latest` 会返回这个 Release，App 内「检查更新」据此比对。
+```powershell
+.\release.ps1 -Version 1.0 -NotesFile .\work\notes.md
+.\release.ps1 -Version 1.0 -DryRun      # 只构建，不打 tag、不建 Release
+```
 
-**为什么只有 tag 能发布**：应用内更新器读的是 `/releases/latest`。如果一个 Release 存在却没有
-APK asset，用户会看到一个装不上的「新版本」。所以流水线宁可失败也不发空 Release。
+`release.ps1` 按顺序做四件事，任何一步失败都立刻停下：
+
+1. 校验版本号（`major` / `major.minor` / `major.minor.patch`，缺段按 0 计），算出
+   `versionCode = major*10000 + minor*100 + patch`。
+2. 不带动 `--offline` 地跑 `:app:assembleRelease`，把版本号用 `-PhyperduoVersionName`
+   / `-PhyperduoVersionCode` 注入。
+3. 复制成 `dist\HyperDuo-<version>.apk`，再用 `aapt2 dump badging` **回读 APK 里的版本**，
+   与预期不符就中止 —— 版本注入写错时这一步会立刻暴露，而不是等用户装上才发现。
+4. 打并推送 `v<version>` tag，创建 GitHub Release（`git credential fill` 取凭据，不存明文
+   token），最后上传 APK asset。
+
+`.tools\debug.keystore` **是入库的**（`.gitignore` 显式放行），所以发布不需要任何 secret，
+产出的 APK 与本地 debug 包、与应用内更新互相覆盖。
+
+**文件名是契约的一部分**：更新器取 Release 的第一个 `.apk` asset，这个名字就是设备上的下载
+文件名。
+
+**为什么一个版本必须带 APK**：应用内更新器读的是 `/releases/latest`。如果一个 Release 存在却
+没有 APK asset，用户会看到一个装不上的「新版本」。所以宁可失败也不要发空 Release。
+
+**为什么不用 GitHub Actions**：最初的 `release.yml` 在 `android-actions/setup-android@v3` 这
+一步就失败了（`platforms;android-37.0` 是 `compileSdk 37` 这种很新的版本化平台，托管 runner 上
+的 setup-android 拿不到），后续步骤全部跳过。修这个要有权限调试别人的 action，而本地产出 APK
+只需要几十秒且工具链已经 vendored，所以改成 `release.ps1`。发布脚本与本地构建共用同一套命令，
+不会出现「CI 能过、本地过不了」的分叉。
 
 ### 安装与观测
 
@@ -340,7 +356,7 @@ app\src\main\java\com\hyperduo\trio\ui\ 设置界面（Kotlin + Compose + Miuix�
 app\src\main\res\                      strings / themes / 图标
 app\src\main\res\xml\file_paths.xml    FileProvider 路径（更新器下载目录）
 app\src\main\resources\META-INF\xposed\  java_init.list / scope.list / module.prop
-.github\workflows\release.yml          tag 触发的发布流水线
+release.ps1                            构建 release APK 并上传到 GitHub Release
 docs\                                  开发文档与 README 配图
 build.gradle.kts / settings.gradle.kts / gradle.properties   构建配置
 install.ps1                            安装 + 打开设置 + 日志
