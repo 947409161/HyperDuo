@@ -134,6 +134,25 @@ release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro
 只需要几十秒且工具链已经 vendored，所以改成 `release.ps1`。发布脚本与本地构建共用同一套命令，
 不会出现「CI 能过、本地过不了」的分叉。
 
+#### 改 `release.ps1` 时的两个坑
+
+**必须保留 UTF-8 BOM**（`release.ps1` 是 UTF-8 **with BOM**）。这个 shell 是 Windows
+PowerShell **5.1**，它读无 BOM 的文件时用 ANSI 代码页（本机是 GBK/936）。中文注释被解成乱码后，
+某个多字节序列会**吞掉后面的引号**，于是报出一堆语法错误（`Missing expression after ','`、
+`The string is missing the terminator`），而那些行本身完全正确。用 `read` 工具或编辑器看到的
+内容是对的，所以这类报错极易被误诊。给文件加回 BOM 即可：
+
+```powershell
+$p='C:\code\HyperDuo\release.ps1'
+$t=[System.IO.File]::ReadAllText($p,[System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText($p,$t,(New-Object System.Text.UTF8Encoding($true)))
+```
+
+**不要用 `& git … 2>&1`**。`$ErrorActionPreference='Stop'` 会把原生程序写到 stderr 的正常输出
+（git 的 `Everything up-to-date`、gradle 的弃用提示）升级成**终止错误**，一个成功的步骤就会中止
+整个发布。脚本里的 `Invoke-Native` 临时把 `$ErrorActionPreference` 放宽到 `Continue`，只用 exit
+code 判成败 —— 调外部程序一律走它。
+
 ### 安装与观测
 
 ```powershell

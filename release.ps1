@@ -33,6 +33,24 @@ $Tools   = Join-Path $Root '.tools'
 $Repo    = 'yixing233/HyperDuo'
 $Package = 'com.hyperduo.trio'
 
+# 原生程序把进度和警告写到 stderr（git 的 "Everything up-to-date"、gradle 的弃用提示）。
+# 在 $ErrorActionPreference='Stop' 下，一旦把 stderr 并进管道，这些就变成终止错误，
+# 会把一个成功的步骤当成失败中止整个发布。所以在这里临时放宽，只用 exit code 判成败。
+function Invoke-Native {
+    param([string]$Exe, [string[]]$Arguments)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Exe @Arguments 2>&1
+        return [pscustomobject]@{
+            Output   = (@($output | ForEach-Object { "$_" }) -join "`n").Trim()
+            ExitCode = $LASTEXITCODE
+        }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 # ---- 版本号校验 -------------------------------------------------------------
 
 if ($Version -notmatch '^\d+(\.\d+){0,2}$') {
@@ -65,8 +83,9 @@ $gradleArgs = @(
     "-PhyperduoVersionCode=$code"
 )
 
-& $gradle @gradleArgs
-if ($LASTEXITCODE -ne 0) { throw "Gradle 构建失败（exit $LASTEXITCODE）" }
+$build = Invoke-Native $gradle $gradleArgs
+$build.Output -split "`n" | Where-Object { $_ -match '^BUILD |^FAILURE|error:' } | ForEach-Object { Write-Host "    $_" }
+if ($build.ExitCode -ne 0) { throw "Gradle 构建失败（exit $($build.ExitCode)）" }
 
 $built = Join-Path $Root 'app\build\outputs\apk\release\app-release.apk'
 if (-not (Test-Path $built)) { throw "没有找到构建产物：$built" }
@@ -77,7 +96,8 @@ Copy-Item $built $target -Force
 
 # 构建出来的是什么版本，以 APK 自己为准 —— 版本注入写错时这里会立刻暴露。
 $aapt = Join-Path $Tools 'sdk\build-tools\37.0.0\aapt2.exe'
-$badging = [string](& $aapt dump badging $target 2>&1 | Select-String -Pattern '^package:' | Select-Object -First 1)
+$badgingRun = Invoke-Native $aapt @('dump', 'badging', $target)
+$badging = [string]($badgingRun.Output -split "`n" | Where-Object { $_ -match '^package:' } | Select-Object -First 1)
 if (-not $badging) { throw "无法读取 $target 的包信息" }
 Write-Host "    $badging"
 if ($badging -notmatch "versionCode='$code'" -or $badging -notmatch "versionName='$Version'") {
@@ -98,8 +118,8 @@ function Get-GitHubToken {
     try {
         # git 只从 stdin 读协议行，PowerShell 管道塞不满它的期望，用 cmd 重定向。
         [System.IO.File]::WriteAllText($tmp, "protocol=https`nhost=github.com`n`n")
-        $raw = & cmd /c "git credential fill < `"$tmp`" 2>&1"
-        $line = $raw | Where-Object { $_ -match '^password=' } | Select-Object -First 1
+        $raw = (Invoke-Native 'cmd' @('/c', "git credential fill < `"$tmp`"")).Output
+        $line = $raw -split "`n" | Where-Object { $_ -match '^password=' } | Select-Object -First 1
         if (-not $line) {
             throw 'GitHub 凭据不可用：git credential fill 没返回 password。先手动 git push 一次让凭据助手记住。'
         }
@@ -120,16 +140,16 @@ $headers = @{
 
 Push-Location $Root
 try {
-    $existing = & git tag -l $tag
+    $existing = (Invoke-Native 'git' @('tag', '-l', $tag)).Output
     if ($existing) {
         Write-Host "==> tag $tag 已存在，跳过创建" -ForegroundColor Yellow
     } else {
-        & git tag -a $tag -m "HyperDuo $Version"
-        if ($LASTEXITCODE -ne 0) { throw "创建 tag $tag 失败" }
+        $created = Invoke-Native 'git' @('tag', '-a', $tag, '-m', "HyperDuo $Version")
+        if ($created.ExitCode -ne 0) { throw "创建 tag $tag 失败：$($created.Output)" }
     }
-    # git 往 stderr 写进度，PowerShell 会当成错误，所以只看 exit code。
-    & git push origin $tag 2>&1 | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "推送 tag $tag 失败" }
+    $pushed = Invoke-Native 'git' @('push', 'origin', $tag)
+    if ($pushed.ExitCode -ne 0) { throw "推送 tag $tag 失败：$($pushed.Output)" }
+    Write-Host "    $($pushed.Output)" -ForegroundColor DarkGray
 } finally {
     Pop-Location
 }
@@ -143,11 +163,15 @@ if (-not $Notes -and $NotesFile) {
     $Notes = [System.IO.File]::ReadAllText((Resolve-Path $NotesFile))
 }
 
+# 只有 404（这个 tag 还没有 Release）才当作「不存在」；网络错误要如实抛出去，
+# 否则一次断网会被误判成「这是首发」，接着在创建 Release 时失败得更难懂。
 $existingRelease = $null
 try {
     $existingRelease = Invoke-RestMethod -Uri "$api/releases/tags/$tag" -Headers $headers
 } catch {
-    $existingRelease = $null
+    $status = $null
+    try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = $null }
+    if ($status -ne 404) { throw }
 }
 
 $payload = @{
