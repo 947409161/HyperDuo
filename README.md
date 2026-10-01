@@ -162,5 +162,4 @@ adb logcat -v time -s LSPosedFramework:* | Select-String HyperDuo
 ## 致谢
 
 - 视觉参考：[status-trio](https://github.com/lingyired/status-trio)（iPhone Duo 风格状态栏图标）。
-- 设置界面参考：[HyperCopy](https://github.com/1812z/HyperCopy)；界面基于 Compose +
-  [Miuix](https://github.com/miuix-kotlin-multiplatform/miuix) 实现 MIUI 风格。
+- 设置界面基于 Compose + [Miuix](https://github.com/miuix-kotlin-multiplatform/miuix) 实现 MIUI 风格。

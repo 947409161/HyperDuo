@@ -279,7 +279,7 @@ work\jadx-out\                         MiuiSystemUI 反编译源（分析用，�
 work\unpacked\                         MiuiSystemUI 解包资源（分析用，不入库）
 work\geocheck\                         离线段渲染与解析校验（不入库）
 .tools\                                JDK / Gradle / SDK / 本地 Maven 仓库
-.ref\                                  status-trio 与 HyperCopy 等参考资料
+.ref\                                  参考模块与 libxposed 源码（分析用，不入库）
 ```
 
 ## 验证记录

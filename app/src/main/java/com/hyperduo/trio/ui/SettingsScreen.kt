@@ -426,9 +426,9 @@ private fun RowScope.PreviewCell(
 }
 
 /**
- * One label/value pair of the about card. The label sits above the value the way
- * HyperCopy's info card does, which keeps long values (the framework string, the
- * scope list) free to wrap without a second column squeezing them.
+ * One label/value pair of the about card. The label sits above the value, which
+ * keeps long values (the framework string, the scope list) free to wrap without
+ * a second column squeezing them.
  */
 @Composable
 private fun InfoRow(label: String, value: String) {
