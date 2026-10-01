@@ -392,7 +392,7 @@ final class TrioRenderer {
 
     // ----------------------------------------------------------- path builders
 
-    /** {@code #battery-charge-icon} from status-menubar.svg. */
+    /** The charging bolt outline, in 120x120 design units. */
     private static Path buildBolt() {
         final Path p = new Path();
         p.moveTo(62.1f, 2.2f);
@@ -414,7 +414,7 @@ final class TrioRenderer {
         return p;
     }
 
-    /** {@code #wifi} {@code data-index="3"} dot from status-menubar.svg. */
+    /** The innermost Wi-Fi dot, in 120x120 design units. */
     private static Path buildWifiDot() {
         final Path p = new Path();
         p.moveTo(59.5f, 69.9f);

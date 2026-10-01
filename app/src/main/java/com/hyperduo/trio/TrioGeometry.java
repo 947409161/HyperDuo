@@ -1,8 +1,8 @@
 package com.hyperduo.trio;
 
 /**
- * Geometry of the "trio" glyph, transcribed 1:1 from the design reference
- * (status-menubar.svg, viewBox 0 0 120 120). All units are design units.
+ * Geometry of the "trio" glyph in a 120x120 design space. All units are design
+ * units.
  */
 final class TrioGeometry {
 

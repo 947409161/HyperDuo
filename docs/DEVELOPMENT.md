@@ -134,8 +134,7 @@ Miuix 的 `MiuixPopupHost` 从 `LocalRootDialogStates` / `LocalDialogStates` 读
 
 ### 几何
 
-120×120 设计空间，常量集中在 `TrioGeometry.java`，数值逐条来自 `status-trio` 的
-`status-menubar.svg` 与 `StatusIconGeometry.swift`。电池环圆心 `(59.5, 61.487)`、半径 51.5、
+120×120 设计空间，常量集中在 `TrioGeometry.java`。电池环圆心 `(59.5, 61.487)`、半径 51.5、
 描边 8、起始角 148.69°、扫过 242.62°（缺口在**底部**）；顶部缺口留给数字（进度 0.353–0.647）
 或闪电（0.385–0.614）。Wi-Fi 半径 31 / 18.5，描边 7，等级 0–3；点阵 4 颗半径 5.5，等级 0–4。
 环线粗细 / 弧线粗细 / 数字字号 / 轨道透明度由 `TrioSettings` 覆盖，未改动时可复现上面这些原始值。
