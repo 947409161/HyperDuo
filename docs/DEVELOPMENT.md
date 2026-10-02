@@ -673,12 +673,12 @@ work\overview\                         全部支持样式的状态总览图（�
 只跑通过的那一边等于没有反例。探针同时产出 `work\gapcheck\out\mouth-{old,new}.png` 对照图。
 
 另有 `work\overview\run.ps1`（不入库）：把渲染器**实际支持的每一个样式**画成一张状态总览图
-`work\overview\out\overview.png`（1788×2926，4 组共 37 格）。它复用 `work\preview` 的桌面垫片，
+`work\overview\out\overview.png`（1788×2214，3 组共 25 格）。它复用 `work\preview` 的桌面垫片，
 每格都以 `TrioSettings.defaults()` 为底再叠加该格的单项 tweak，因此代表的始终是出厂外观。用途有二：
 一是改渲染器后一眼看全所有样式的回归（新样式没进这张图就等于没被清点），二是给用户/文档出图。
 出图脚本会打印被编译的 `TrioRenderer.java` 的 SHA256，便于确认图对应哪份代码。
 
-**当前支持样式的清单**（即总览图的四组，也是渲染器能力的边界）：
+**当前支持样式的清单**（即总览图的三组，也是渲染器能力的边界）：
 
 - 电池（顶部）10 格：充电中 / 快速充电 / 用电中（数字）/ 低电量 / 低电量模式 / 危险电量 /
   已充满 / 只显示圆环 / 无 Wi-Fi 时数字居中 / 无 Wi-Fi 时充电且数字居中。
@@ -687,8 +687,10 @@ work\overview\                         全部支持样式的状态总览图（�
 - 移动信号与网络类型 8 格：信号 4 格 / 2 格 / 无信号 / 网络类型环内 4G / 环内 5G / 环内 5GA /
   类型关闭 / 类型环外。**环外类型不由本 Canvas 绘制** —— 它由 `TrioHooks` 另建的
   `OutTypeLabel extends TextView` 画在电池表左侧，所以那一格是手绘标签示意，不是渲染器输出。
-- 外观与几何 12 格：浅色外观 / 深色外观 / 状态颜色关闭（单色）/ 底纹浓度 0 与 255 /
-  环线粗细 4 与 16 / 数字字号 16 与 44 / 类型字号 44 / 弧线粗细 3 与 16。
+
+**造型参数不入图**：环线／弧线粗细、数字／类型字号、底纹浓度、状态颜色开关这些是外观旋钮，
+不是图标状态，因此总览图不再单列「外观与几何」一组。要看这些的边界值就改设置界面的滑块；
+它们不构成需要清点的能力面。
 
 参考的 macOS 版总览图里还有两组本模块**没有实现**，不要误画：**蓝牙音频**（4 格）与**音量**（7 格）
 在 `app\src\main\java\com\hyperduo\trio` 下搜 `volume|bluetooth|audio|headset|earbud` 无任何匹配。
@@ -869,13 +871,14 @@ work\overview\                         全部支持样式的状态总览图（�
   `mx >= 90` 会把背景 `#656563` 一起算成轨道（13144 px，圆心被拖到背景里）。正确做法是先按
   目视取粗略圆心做环形预筛（`18 < d < 34`）再拟合，且背景灰度必须排除。
 - **全量样式总览图**（对照 macOS 版 `Status Trio` 总览图出的图）：`work\overview\run.ps1`
-  `exit 0`，`work\overview\out\overview.png`，`1788×2926`，4 组共 **37 格**，
+  `exit 0`，`work\overview\out\overview.png`，`1788×2214`，3 组共 **25 格**，
   `renderer = 207c17d0acd87680d15ae959e3525e7849027bdc58b12ae4c13a2dc3ca36820a`
   （即出图时 `TrioRenderer.java` 的 SHA256，用来确认图对应哪份代码）。放大目视核对
-  `crop-battery.png`(2x) / `crop-critical.png`(3x) / `crop-mobile.png`(2x) / `crop-look.png`(2x)
-  逐格正确。**清点结论**：参考图的「蓝牙音频」4 格与「音量」7 格在本模块无任何实现
+  `crop-battery.png`(2x) / `crop-wifi.png`(2x) / `crop-mobile.png`(2x) 逐格正确。
+  **清点结论**：参考图的「蓝牙音频」4 格与「音量」7 格在本模块无任何实现
   （`volume|bluetooth|audio|headset|earbud` 零匹配），「已连接电源，未充电」也没有对应状态
   （渲染器只有充电 / 未充电两态），这三类都不应画进图里 —— 详见「测试」一节的样式清单。
+  原图曾另有一组「外观与几何」12 格，后按要求删除：那是外观旋钮而非图标状态。
 - 教训（出图也会溢出）：总览图页脚前两版都**超出右边界被静默裁掉**，肉眼在图缩略图上根本看不出。
   改成 `footerLine(...)` 先 `getFontMetrics().stringWidth` 量宽、超宽直接 `throw`，
   立刻报出 `footer line overflows the page by 49px`。凡是定宽排版出图，都要让"画不下"变成
