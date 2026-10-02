@@ -746,11 +746,23 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
   `AndroidRuntime:E`；状态栏 / 锁屏 / 控制中心的原生 Wi-Fi、移动（含 `stacked_mobile`）、电池
   图标均被抑制；屏幕中央不再残留游离的「5G」；Wi-Fi 关闭时不画弧；深色背景下前景色取样正确；
   切换设置不重启 SystemUI 即生效。
-- 居中开关（存储键 `swap_wifi_value`）上机双向验证：关机位为「Wi-Fi 弧在圆心（无 Wi-Fi 时数字自动落圆心）」，
-  开机位为「数字恒在圆心 / Wi-Fi 弧缩进顶部缺口 / 充电时小闪电占缺口且弧整组不画 / 环内网络类型退到缺口」；
-  切换即时生效，无需重启。**修正记录**：早期实现让「居中 + 充电」时大闪电占圆心、数字缩到缺口，与
-  「数字在居中模式下优先级最高」的语义相反；`work\slotcheck\verify.ps1` 用同一探针在新旧两版之间对照
+- 居中开关（存储键 `swap_wifi_value`）上机双向验证（小米 14 / houji / Android 17 / HyperOS 4 / KernelSU，
+  `versionCode=10300` / `versionName=1.3`，`adb install -r` Success、SystemUI 重启后
+  `HyperDuo installed, hooks=9 enabled=true`、无 `FATAL EXCEPTION`）——三态各取一帧，8x 放大目视：
+  - `work\ondevice\v13-ring-8x.png`（充电 + Wi-Fi 关闭，真实 100%）：缺口里是**小闪电**，
+    圆心是 **100**——即「数字优先级最高」，不是旧版的大闪电占圆心。
+  - `work\ondevice\v13-charge-wifi-8x.png`（充电 + **Wi-Fi 已关联** `OpenWrt` / RSSI `-38`）：
+    缺口只有小闪电，**两条 Wi-Fi 弧整组不画**（验证 `cfg.showWifi && (!centred || wifiInGap)` 这道门）。
+  - `work\ondevice\v13-wifi-8x.png`（`dumpsys battery unplug` + Wi-Fi 已关联）：**弧缩进顶部缺口**、
+    数字仍在圆心。
+  截图 `v13-charging.png` / `v13-charge-wifi.png` / `v13-wifi.png`，裁图用
+  `& "$env:JAVA_HOME\bin\java.exe" -cp work\overview\classes Crop <src> <dst> 1055 20 90 85 8`。
+  取完把 Wi-Fi 关回 `off`、`dumpsys battery reset` 已确认（`USB powered: true` / `level: 100` 为真实状态）。
+  **修正记录**：早期实现让「居中 + 充电」时大闪电占圆心、数字缩到缺口，与「数字在居中模式下优先级最高」
+  的语义相反；1.2 上机截图正是这个错误形态。`work\slotcheck\verify.ps1` 用同一探针在新旧两版之间对照
   （新版 exit 0 / 旧版 exit 1，6 项不符），并把 12 个非居中状态锁成逐像素不变。
+  **探针基线必须写死修订号**：它原先按 `HEAD` 重建旧版，修复提交后 `HEAD` 就是修复本身，
+  会自己跟自己比却照样打印 `VERIFIED`——现已固定为 `$BaseRev = '312ae00'`。
 - 更新器上机验证：无 Release 时点「检查更新」显示「作者尚未发布任何正式版本」（404 视为正常
   空答案而非失败），界面不卡死、不误报。
 - 更新器端到端验证（真机）：把 debug 包故意装成 0.9(900)，走完「检查更新 → 下载更新 → 安装」，
