@@ -32,8 +32,24 @@ private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/late
 /** Opened when the user wants the notes in full, or when a download is refused. */
 internal const val RELEASES_PAGE = "https://github.com/$REPO/releases"
 
-/** How long a stalled connection may hang before the check fails. */
-private const val TIMEOUT_MS = 15000
+/**
+ * How long the connect handshake and each read may hang.
+ *
+ * <p>Kept apart because they fail for different reasons: the connect is what
+ * times out when GitHub's front door is unreachable, while a read is a transfer
+ * that stalled mid-file.
+ */
+private const val CONNECT_TIMEOUT_MS = 15000
+private const val READ_TIMEOUT_MS = 20000
+
+/**
+ * How many times a network step is attempted before the card reports failure.
+ *
+ * <p>The device's route to GitHub is genuinely flaky — the same URL alternates
+ * between a 1.5 s success and a connect timeout — so a single attempt reads as a
+ * broken feature when a second one would have worked.
+ */
+private const val ATTEMPTS = 3
 
 /** One published release, reduced to what the card renders. */
 internal data class UpdateInfo(
@@ -46,7 +62,24 @@ internal data class UpdateInfo(
     val apkUrl: String,
     val apkName: String,
     val apkSize: Long,
+    /** The asset's numeric id, which is what the API download endpoint needs. */
+    val assetId: Long,
 )
+
+/**
+ * The URLs to try for the APK, best first.
+ *
+ * <p>`browser_download_url` points at `github.com`, and on this device that host
+ * resolves to an Azure address that intermittently refuses to complete a
+ * handshake — the same URL alternates between a 1.5 s success and a 15 s connect
+ * timeout. The asset API endpoint serves the identical bytes through
+ * `api.github.com`, which answered 10 out of 10 attempts, so it is tried first
+ * and the browser URL is kept only as a fallback.
+ */
+private fun UpdateInfo.downloadUrls(): List<String> = buildList {
+    if (assetId > 0L) add("https://api.github.com/repos/$REPO/releases/assets/$assetId")
+    if (apkUrl.isNotBlank()) add(apkUrl)
+}.distinct()
 
 /** Everything the update card can be showing. */
 internal sealed interface UpdateState {
@@ -74,6 +107,18 @@ internal sealed interface UpdateState {
      *   would lose its meaning if it were translated.
      */
     data class Failed(val detail: String?) : UpdateState
+}
+
+/** How an install attempt ended, so the card can explain each case differently. */
+internal enum class InstallResult {
+    /** The system installer is on screen; the user has the last word. */
+    Started,
+
+    /** The "install unknown apps" grant is missing and the user can give it. */
+    NeedsPermission,
+
+    /** Nothing on the device handles a package-install intent. */
+    NoInstaller,
 }
 
 /**
@@ -108,7 +153,7 @@ internal class UpdateController(private val context: Context) {
         state = UpdateState.Checking
         scope.launch {
             val current = installedVersion(context)
-            val result = withContext(Dispatchers.IO) { runCatching { fetchLatest() } }
+            val result = withContext(Dispatchers.IO) { runCatching { retry { fetchLatest() } } }
             state = result.fold(
                 onSuccess = { info ->
                     when {
@@ -139,7 +184,7 @@ internal class UpdateController(private val context: Context) {
                     // A name that changes with the release, so a stale download
                     // from a previous check can never be installed by accident.
                     val file = File(dir, sanitise(info.apkName, info.version))
-                    downloadToFile(info.apkUrl, file) { fraction ->
+                    downloadFrom(info, file) { fraction ->
                         state = UpdateState.Downloading(info, fraction)
                     }
                     file
@@ -159,14 +204,23 @@ internal class UpdateController(private val context: Context) {
      * SystemUI without a visible confirmation is not something a user should be
      * able to trigger by accident.
      *
-     * @return false when the app still lacks the "install unknown apps" grant, in
-     *   which case the caller [UpdateController.openInstallPermissionScreen].
+     * A boolean would flatten two unrelated refusals into one, and the caller has
+     * to say something different for each: the grant is the user's to give on a
+     * settings page, whereas a missing installer is not something the user can
+     * fix by granting anything.
+     *
+     * @return [InstallResult.Started] once the system installer is on screen;
+     *   [InstallResult.NeedsPermission] when the "install unknown apps" grant is
+     *   still missing, in which case the caller
+     *   [UpdateController.openInstallPermissionScreen]; or
+     *   [InstallResult.NoInstaller] when no activity on the device would handle
+     *   the intent.
      */
-    fun install(file: File): Boolean {
+    fun install(file: File): InstallResult {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !context.packageManager.canRequestPackageInstalls()
         ) {
-            return false
+            return InstallResult.NeedsPermission
         }
         val uri: Uri = FileProvider.getUriForFile(
             context,
@@ -177,10 +231,16 @@ internal class UpdateController(private val context: Context) {
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching {
+        // A missing handler is caught rather than pre-checked: on Android 11+ an
+        // app's view of installed packages is filtered, so resolveActivity can
+        // answer null for an installer that would in fact have opened. Only the
+        // attempt itself is authoritative.
+        return try {
             context.startActivity(intent)
-            true
-        }.getOrDefault(false)
+            InstallResult.Started
+        } catch (e: Exception) {
+            InstallResult.NoInstaller
+        }
     }
 
     /** Sends the user to the per-app "install unknown apps" switch. */
@@ -237,8 +297,8 @@ private fun installedVersion(context: Context): String = runCatching {
 private fun fetchLatest(): UpdateInfo? {
     val connection = (URL(API_LATEST).openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"
-        connectTimeout = TIMEOUT_MS
-        readTimeout = TIMEOUT_MS
+        connectTimeout = CONNECT_TIMEOUT_MS
+        readTimeout = READ_TIMEOUT_MS
         // The API rejects requests without one, and advertises the pinned media
         // type so a future API default cannot change the shape of the reply.
         setRequestProperty("User-Agent", "HyperDuo-Updater")
@@ -272,6 +332,7 @@ private fun parseRelease(json: JSONObject): UpdateInfo {
     var apkUrl = ""
     var apkName = "HyperDuo-$version.apk"
     var apkSize = 0L
+    var assetId = 0L
     if (assets != null) {
         for (i in 0 until assets.length()) {
             val asset = assets.optJSONObject(i) ?: continue
@@ -280,10 +341,11 @@ private fun parseRelease(json: JSONObject): UpdateInfo {
             apkUrl = asset.optString("browser_download_url")
             apkName = name
             apkSize = asset.optLong("size")
+            assetId = asset.optLong("id")
             break
         }
     }
-    if (apkUrl.isBlank()) throw IllegalStateException("no apk asset")
+    if (apkUrl.isBlank() && assetId <= 0L) throw IllegalStateException("no apk asset")
     return UpdateInfo(
         tag = tag,
         version = version,
@@ -292,7 +354,55 @@ private fun parseRelease(json: JSONObject): UpdateInfo {
         apkUrl = apkUrl,
         apkName = apkName,
         apkSize = apkSize,
+        assetId = assetId,
     )
+}
+
+/**
+ * Runs [block], retrying a failure up to [ATTEMPTS] times.
+ *
+ * <p>Only for steps that are safe to repeat: both the metadata query and the APK
+ * download are plain GETs, and a re-download overwrites its own `.part` file.
+ */
+private inline fun <T> retry(block: () -> T): T {
+    var last: Throwable? = null
+    repeat(ATTEMPTS) { attempt ->
+        try {
+            return block()
+        } catch (t: Throwable) {
+            last = t
+            // Backing off keeps a host that is refusing connections from being
+            // hammered, which is what turns one flaky attempt into three.
+            if (attempt < ATTEMPTS - 1) Thread.sleep(400L * (attempt + 1))
+        }
+    }
+    throw last ?: IllegalStateException("retry failed")
+}
+
+/**
+ * Downloads [info]'s APK into [target], trying each candidate URL in turn.
+ *
+ * <p>The API endpoint is preferred over the browser URL; see
+ * [UpdateInfo.downloadUrls]. A failure against one endpoint is not a failure of
+ * the download as long as another one serves the bytes, which matters here
+ * because only one of the two hosts is reliable from this network.
+ *
+ * @throws IllegalStateException when every endpoint failed, carrying the last
+ *   reason so the card can show something diagnostic.
+ */
+private fun downloadFrom(info: UpdateInfo, target: File, onProgress: (Float) -> Unit) {
+    val urls = info.downloadUrls()
+    if (urls.isEmpty()) throw IllegalStateException("no download URL")
+    var last: Throwable? = null
+    for (url in urls) {
+        try {
+            retry { downloadToFile(url, target, onProgress) }
+            return
+        } catch (t: Throwable) {
+            last = t
+        }
+    }
+    throw last ?: IllegalStateException("download failed")
 }
 
 /**
@@ -304,12 +414,15 @@ private fun parseRelease(json: JSONObject): UpdateInfo {
 private fun downloadToFile(url: String, target: File, onProgress: (Float) -> Unit) {
     val connection = (URL(url).openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"
-        connectTimeout = TIMEOUT_MS
-        readTimeout = TIMEOUT_MS
+        connectTimeout = CONNECT_TIMEOUT_MS
+        readTimeout = READ_TIMEOUT_MS
         setRequestProperty("User-Agent", "HyperDuo-Updater")
-        // GitHub serves assets through a redirect to a signed CDN URL; the
-        // default follow is what makes the download work at all.
+        // The browser URL redirects to a signed CDN URL, and the API endpoint
+        // does too unless the octet-stream type is asked for; the default follow
+        // is what makes either work.
         instanceFollowRedirects = true
+        // Without this the API answers with JSON metadata instead of the bytes.
+        setRequestProperty("Accept", "application/octet-stream")
     }
     val part = File(target.parentFile, "${target.name}.part")
     try {

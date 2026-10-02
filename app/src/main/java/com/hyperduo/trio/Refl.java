@@ -94,6 +94,30 @@ final class Refl {
         }
     }
 
+    /** Invokes an already-resolved no-arg method, or returns null. */
+    static Object invoke(Method m, Object o) {
+        if (m == null || o == null) {
+            return null;
+        }
+        try {
+            return m.invoke(o);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Invokes an already-resolved method with arguments, or returns null. */
+    static Object invokeArgs(Method m, Object o, Object[] args) {
+        if (m == null || o == null) {
+            return null;
+        }
+        try {
+            return m.invoke(o, args);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** Invokes a public no-arg method by name, or returns null. */
     static Object callByName(Object o, String name) {
         if (o == null) {

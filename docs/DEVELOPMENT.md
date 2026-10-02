@@ -47,23 +47,42 @@ com.hyperduo.trio
 
 ## 构建
 
-需要 JDK 17、Android SDK（platform 37 + build-tools 37.0.0）与 Gradle 9.8。本仓库把整套工具链
-与依赖都放在 `.tools\`，并且依赖已经本地化为可离线仓库，构建**无需联网**：
+需要 JDK 21、Android SDK（platform 37 + build-tools 37.0.0）与 Gradle 9.8。本仓库把整套工具链
+与依赖都放在 `.tools\`：
 
 ```powershell
 $T='C:\code\HyperDuo\.tools'
-$env:JAVA_HOME="$T\jdk\jdk-17.0.20.1+1"
+$env:JAVA_HOME="$T\jdk\jdk-21.0.12.1+1"
 $env:GRADLE_USER_HOME="$T\gradle-home"
 $env:ANDROID_HOME="$T\sdk"
-& "$T\gradle\gradle-9.8.0\bin\gradle.bat" --project-dir C:\code\HyperDuo :app:assembleDebug --offline --no-daemon --console=plain
+& "$T\gradle\gradle-9.8.0\bin\gradle.bat" --project-dir C:\code\HyperDuo :app:assembleDebug --no-daemon --console=plain
 ```
 
 产物：`app\build\outputs\apk\debug\app-debug.apk`。
 
+**JDK 21 是硬性要求，不是偏好。** Miuix 0.9.4 的全部产物都是 Java 21 字节码（class 文件
+major 65），而 `miuix-nav` 的入口 `rememberNavController` / `entry` 是 inline composable：
+Kotlin 拒绝把 21 的目标 inline 进 17 的输出，报
+
+```
+Cannot inline bytecode built with JVM target 21 into bytecode that is being
+built with JVM target 17. Specify proper '-jvm-target' option.
+```
+
+而且 AGP 会硬性校验两侧一致（`Inconsistent JVM targets between Java and Kotlin
+compile tasks: 17 and 21.`），所以 `compileOptions` 与 `kotlin.compilerOptions.jvmTarget`
+必须同时是 21，也就必须有一个真能产出 21 class 的 `javac`——只把 Kotlin 单独升到 21
+在 JDK 17 上编不过（`无效的源发行版：21`）。`build.ps1` 的离线管线仍然用
+`-source 8 -target 8`，JDK 21 接受这两个值（有 deprecation 警告），只是共用同一个 JDK。
+
+**构建需要联网。** `io.github.libxposed` 已 vendored 到 `.tools\maven`，但 miuix 0.9.4
+与 miuix-nav 不在本地 Gradle 缓存里，`--offline` 会解析失败。
+
 要点：
 
 - `settings.gradle.kts` 把 `.tools\maven` 作为**第一个**仓库（承载 `io.github.libxposed:api/service`
-  的本地副本），排在 `google()` / `mavenCentral()` 之前，所以 `--offline` 也能解析。
+  的本地副本），排在 `google()` / `mavenCentral()` 之前，所以 libxposed 部分不依赖网络
+  （miuix 部分仍然依赖，见上）。
   `dependencyResolutionManagement` 用的是 `FAIL_ON_PROJECT_REPOS`，因此**不要在模块里写
   `repositories {}`**。
 - `android.useAndroidX=true`（Compose 必需）。Compose 编译器是
@@ -201,6 +220,146 @@ Miuix 的 `MiuixPopupHost` 从 `LocalRootDialogStates` / `LocalDialogStates` 读
 而这两个 CompositionLocal 只由 `Scaffold` 提供；写在外部会注册到一个没人渲染的孤儿列表，
 弹窗**静默不出现且不报错**。
 
+这条约束对重启确认弹窗同样成立：它用的就是 `OverlayDialog`，所以也必须留在 `Scaffold` 的 content
+lambda 内。`window.*` 下的组件（`WindowDialog`、`WindowBottomSheet` 等）**不受这条约束**：它们自己开一个
+真正的 `androidx.compose.ui.window.Dialog`，与 `Scaffold` 的弹窗宿主无关，因此不依赖任何父级。本项目
+没有用它们：多引入一种弹窗形态不如复用颜色选择弹窗已有的那种。
+
+### 重启系统界面
+
+顶栏右侧的「重启系统界面」按钮需要 root。它执行的是 `su -c "killall com.android.systemui"`，与
+README 里给的手工命令一致——用 `su -c` 而不是往裸 `su` 里喂命令，是为了让退出码属于真正要执行的那条
+命令：授权被拒绝与 `killall` 本身失败都表现为非 0，不必从输出里去猜。stdout 与 stderr 合并后**先读完
+再 `waitFor`**，否则 shell 写满无人读的管道会一直阻塞，`waitFor` 永不返回。
+
+状态机在 `ui/RestartController.kt`（`Idle` / `Running` / `Done` / `Failed`）。它和 `UpdateController`
+一样被提到 screen 级持有：确认弹窗被关掉后 kill 可能仍在进行，root 授权弹窗也不一定随着弹窗消失。
+
+确认弹窗复用颜色选择弹窗那套 `OverlayDialog`，因此和它一样必须写在 `Scaffold` 的 content lambda 内
+（见上一节）。kill 进行中把 `enabled` 置为 `false` 并让 `onDismissRequest` 直接返回，此时取消/确认按钮
+都不可点、点击外部与返回键也都不关闭——用户可能正对着 root 授权弹窗，此时关掉确认弹窗会让结果无处可报。
+失败文案沿用更新卡片「本地化标题 · 原始诊断文本」的拼接方式，诊断文本不翻译。**这条通路不需要新增
+`Prefs` 键**，也不经过配置通道。
+
+### 颜色恢复默认的确认
+
+颜色页的「恢复默认」同样先弹确认。它和重启确认共用同一套 `OverlayDialog` 外壳（`ResetColorsDialog`），
+所以同样必须在 `Scaffold` 的 content lambda 内。理由是这条操作会一次性丢掉六种自定义颜色（三种状态 ×
+深/浅背景）且没有撤销，误触的代价与重启同一个量级。
+
+弹窗打开期间只翻转一个 `resettingColors` 布尔值，**不在打开时就重置**：确认与取消走的是同一条 `update`
+漏斗，写操作只发生在确认回调里。该行此前没有 `enabled` 守卫，顺带补上 `gated && settings.roleColors`——
+在状态颜色总开关关闭时它重置的是一组不生效的值，和上面几行保持一致的灰显更合理。
+
+### 顶栏模糊
+
+顶栏用 `miuix-blur` 的 `Modifier.textureBlur` 采样页面内容做磨砂玻璃，而不是画一层不透明底色。
+两个修饰符缺一不可：页面 `LazyColumn` 挂 `Modifier.layerBackdrop(backdrop)` 把自己录进一个
+graphics layer，顶栏再通过同一个 `backdrop` 采样它——捕获源与采样面是 `Scaffold` 里两个不同的兄弟槽位，
+库内部靠 `layerCoordinates.localPositionOf()` 对齐全局坐标，不需要嵌套。
+
+- **必须自己门控，不能只依赖库**：库在 `isRuntimeShaderSupported()` 为假时会跳过特效本身
+  （`DrawBackdropNode.draw()` 首行 `if (!enabled) { drawContent(); return }`），但这对本项目不够——
+  模糊顶替的是顶栏自己的背景，而 `TopAppBar` 把传入的 `modifier` 应用在自身 `background(color)`
+  **之前**，所以未门控的老设备上会得到一个完全没有背景的顶栏，列表会直接从标题上滚过去。
+  因此调用点用 `if (barBlurSupported)` 同时切换 `modifier` 与 `color`（支持时 `Color.Transparent`，
+  否则 `surfaceColor`）。
+- **捕获层必须先铺不透明底**：页面留白与卡片间隙是透明的，直接模糊会把邻格颜色横着拖开一道。
+  `rememberLayerBackdrop { drawRect(surfaceColor); drawContent() }` 先铺一层 `surface`。
+- `rememberLayerBackdrop` 的 `onDraw` 经 `rememberUpdatedState` 读取，所以每帧新建的 lambda 不会重建
+  backdrop、不会重置坐标；但 `remember` 本身必须**无条件**调用，条件化会破坏 slot table。
+- `BarBlurRadius = 40f`，远高于库默认的 20dp：顶栏有状态栏 + 大标题那么高，半径太小时底下文字仍可辨，
+  观感只是半透明蒙层而非磨砂。
+- 依赖侧：`miuix-blur-android` 的 aar 自带 `minSdkVersion="33"`，而本项目 `minSdk = 29`；靠
+  `app/src/main/AndroidManifest.xml` 里的 `<uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />`
+  保住 29（已验证 merge 后仍是 `minSdkVersion="29"`）。`miuix-shader-android` 虽由 blur 传递引入，
+  但代码直接 import 了它的 `isRuntimeShaderSupported()`，所以也显式声明。
+
+### 提示文案：Snackbar 与 Tooltip
+
+- 原先的 `android.widget.Toast` 已全部换成 Miuix `SnackbarHost`（`Scaffold(snackbarHost = ...)`）。
+  用它是因为它与页面同一个 surface、跟随主题、且随页面销毁而消失。时长选 `SnackbarDuration.Short`
+  （4000ms）而不是 `Long`（10000ms），因为被替换掉的 toast 是 `LENGTH_LONG` 的 ~3500ms。
+  所有弹出都收敛到一个 `showMessage: (String) -> Unit`，并用 `remember(scope, snackbarHostState)`
+  包住，避免每个接收它的行都被不稳定 lambda 拖着重绘。
+- 被复合门控灰显的行（例如需要先开总开关再开子开关）加 `TooltipBox` 长按提示，文案来自
+  单条格式串 `R.string.gate_hint`（`需要先打开「%1$s」` / `Turn on "%1$s" first`），
+  由 `gateHint(vararg gates: Pair<Boolean, Int>)` 取第一个未满足的开关名。提示通过
+  `enabled = hint != null` 关闭——`Tooltip.kt` 里 `tooltipGestures` 在 `enabled = false` 时退化成
+  普通 Modifier，所以灰显行只有在确实存在未打开的前置开关时才响应长按。
+- **仅被总开关拦下的行刻意不加提示**：总开关就在同一屏上，提示是噪音。
+
+### 导航：miuix-nav
+
+设置页的四个分区由 `miuix-nav` 的 `NavDisplay` 承载，四个标签就是栈上的四个目的地。
+
+- 路由是 `@Serializable sealed interface Route : NavKey` 下的四个 **data object**。必须可序列化
+  是因为 nav 把 back stack 放在 `rememberSaveable` 里、用 serializer 重建；必须是 object 是因为
+  nav 用路由自己的 `toString()` 给每个条目的 saved state 做命名空间，object 的 `toString()`
+  是类名（跨进程稳定），而普通类的默认实现会打印 identity hash（进程重启后复位）。
+- `rememberNavController<Route>(Route.General)` 的**超类型必须显式写出来**：reified 参数否则会
+  从实参推断成 `Route.General`，之后 push 其它三个子类型时保存/恢复会序列化失败。
+- 切分区走 `selectTab`：落在已经在栈上的路由就 `popUntil` 回退过去，不在栈上才 `push`。
+  这样栈是一条路径而不是点击流水账，也顺手满足 nav 文档要求的 push 幂等（重复 key 会被拒绝，
+  而标签条允许点得比转场更快）。
+- **页面级状态必须传对象而不是值。** `NavDisplay` 内部是
+  `val provider = remember(content) { entryProvider(content) }`——DSL lambda 被记忆，provider
+  只在 lambda 实例变化时重建。所以 entry 里若捕获 `settings` 的**值**，之后设置变化时它会一直
+  渲染那个快照。因此 `SettingsScreen` 保留 `settingsState`/`serviceState` 两个 `MutableState`
+  对象并把它俩传给 entry，让每次读取都发生在目的地自己的组合里（真实 snapshot read）。
+- **`preview` + 标签条留在每个目的地的 `LazyColumn` 里，没有提到 `NavDisplay` 之上。**
+  它是页面的一部分，要跟着内容滚走：顶栏的收起依赖这个滚动，预览卡也正因如此才能在不滚回
+  顶部的情况下与设置项对照。提到上层会把它钉在屏幕顶部，两件事同时坏掉。
+  四个目的地各带一份（`sectionHeader()`，`SettingsScreen.kt:314-330`），所以它随各自的列表
+  滚动。看起来是四份重复，实际不会看出差别：两份是同样的像素、同一个位置，
+  转场时互相淡入淡出落在完全相同的内容上。
+  位置也验过是等价的——把 header 放进列表只改了它的归属，没改它的坐标：改动前后两次
+  `uiautomator dump` 里预览卡与四个标签的 `bounds` 逐字相同。
+- 起先放在那条唯一 `LazyColumn` 上的 `.layerBackdrop(barBackdrop)` 与
+  `.nestedScroll(scrollBehavior.nestedScrollConnection)` 上移到 `NavDisplay`：模糊要采样整页，
+  滚动行为要听到现在发生在目的地内部的滚动。
+- **切标签一律回到列表顶部，不恢复上次的滚动位置。** 这里换过两次方向，最终以用户的
+  「不要记录页面位置」为准。中间那版曾把「每个目的地各留各的偏移」当成返回语义的正确形态：
+  四个分区各有一个 `listState`，走回去就回到原处。问题在于目的地被覆盖时**仍然组合着**
+  （见下文交叉淡入的可见窗口），所以「回到原处」不是恢复一个冻结的快照，而是读者刚在标签条上
+  选了一个分区、却被丢进它的中段。滚动偏移属于这一次访问，不属于这个分区，因此不跨访问携带。
+  实现：`SectionList` 多收一个 `isTop`（`SettingsScreen.kt:572-587`），
+  `LaunchedEffect(isTop) { if (isTop) listState.scrollToItem(0) }`；四个 entry 各自传
+  `isTop = nav.backStack.lastOrNull() == Route.Xxx`（`SettingsScreen.kt:467/475/483/497`）。**键取 `isTop` 而不是
+  `LaunchedEffect(Unit)`**：同一个已组合的列表会被反复覆盖又揭开，重置必须发生在每次「成为栈顶」
+  时，而不是当初创建它的那次组合里。
+- 对话框（取色、重启、重置确认）**刻意不做成路由**：它们是浮在页面上的提示，推成路由会让
+  返回手势的含义从「回上一个分区」变成「取消」。
+- **转场不能用库的预设，必须换成一个零位移的交叉淡入。** `NavTransitions.MiuixDefault` 的动作是
+  「到达一个新页面」：进入的层从右缘整幅推入（`NavTransitions.kt:43-57` 里 `d <= 0f` 分支的
+  `translationX` 最大等于页宽），被它覆盖的层视差左移 1/4 页宽并降到 0.9 alpha，外层再由
+  `NavDisplayEffects.dimAmount = 0.5f` 压一层灰。四个标签是同一页的四个视图，横推过去看着像
+  把页面撕成两半。`SectionTransition`（`SettingsScreen.kt:195-228`）因此
+  只动 alpha：`relativeDepth` 为 0 是停在顶层、-1 是完全退出到上层之上、+1 是被上层盖住，所以
+  `alpha = if (d <= 0f) (1f + d) else 1f` 一个式子就同时管往前往后两个方向，被盖住的那层保持
+  全不透明直到真的被盖住。
+  **挑 alpha 而不是位移动画，也是因为 header 就在被动画的层里**：两份 header 是同一批像素，
+  淡入淡出看不出来；一旦改成横推或缩放，屏幕上就会出现两套错开的预览卡与标签条。
+- **被覆盖分支也必须显式写 `alpha`。** 这个 block 跑在 `Modifier.graphicsLayer { }` 里，而
+  graphicsLayer 是跨帧保留的：某个属性这一帧不再被赋值，它就沿用上一帧的值。只在 `d <= 0f`
+  时赋值会让层冻结在它上一次进入动画的 alpha 上，而不是正常显示为不透明。
+- 时长取 220 ms 而非预设的 500 ms，`NavDriverSpec.PROGRAMMATIC_DURATION_MILLIS` 是为整页推入调
+  的曲线。另外只有**静止起步的整步**才会走 `programmatic` 曲线
+  （`runtime\NavDriver.kt` 的 `usesProgrammaticCurve = velocity == 0f && abs(distance) >= 0.999f`），
+  所以这个 Tween 实际只作用于点标签；返回手势中途松手带着速度，仍会落到 `commit` 的 spring 上。
+- `SectionEffects`（`SettingsScreen.kt:235-238`）关掉 `enableCornerClip`、把 `dimAmount` 设为 0：
+  这里从没有层叠在另一层之上，裁角和压暗都没有对象。
+- **每个目的地的 `LazyColumn` 必须自己铺底色（`Modifier.background(MiuixTheme.colorScheme.surface)`，
+  `SettingsScreen.kt:606`）。** 交叉淡入要求被覆盖的那层在转场期间继续组合、继续绘制——
+  visibility window 是 `-1 < d <= opaqueDepth`（`runtime\NavPresentation.kt:104`），
+  `opaqueDepth = 1f` 正是为了留住这一层。问题是两个列表尺寸位置完全相同，被覆盖层**只能被上层
+  实际画出的像素遮住**：卡片之间有 12dp 间隙、较短的分区结束后还有大片空白，透明列表在这些地方
+  什么都盖不住，于是上一个分区的行直接透出来，看起来像旧标签页垫在新标签页底下（用户报的原话是
+  「不同标签页会覆盖上一个标签页的内容在底层」）。`Scaffold` 只画一层底色（`containerColor =
+  MiuixTheme.colorScheme.surface`，`.tools\tmp-src\miuix-sources\…\basic\Scaffold.kt:88`），
+  在只有一个列表的年代够用，现在得由列表自己负责。用同一个 surface 色是刻意的：静止态因此
+  与改动前逐像素一致。
+
 ## 实现要点
 
 ### 注入点
@@ -223,6 +382,18 @@ Miuix 的 `MiuixPopupHost` 从 `LocalRootDialogStates` / `LocalDialogStates` 读
 （`TrioRenderer.java:118` 起）；圆心与缺口的字号、基线、清空宽度分别由
 `TrioGeometry.centreSize/centerBaseline/centreClearWidth` 与 `gapBaseline/gapClearWidth` 给出。
 
+`batteryRing(Canvas, from, to, gapStart, gapEnd)` 的 `from` / `to` 是**可见弧**上的进度，不是整条
+路径的进度：缺口本身不出墨，也就不该占用电量。设缺口为 `[m0, m1]`，可见弧长
+`drawn = m0 + (1 - m1)`，那么电量 `f` 到达的可见位置是 `u = f * drawn`，左段画
+`[0, min(u, m0)]`、右段画 `[m1, m1 + max(0, u - m0)]`。于是 `drawn = 0.65` 时 50% 恰好铺满左半环
+（`u = 0.325 = m0`）、右半环为空，50%–100% 全部落在右半环上。
+
+早期实现把 `level/100` 当作整条路径的进度直接用（`from`/`to` 不乘 `drawn`），缺口宽度没有补偿，
+症状是电量在缺口整段宽度内**原地不动**：45% 就已填满左半环，而右半环要等电量爬过 67% 才起弧。
+端帽（`STROKE` 是 `Paint.Cap.ROUND`，半宽 `stroke/2`）会让每段末端向外多渗一点墨：`stroke = 14`
+时约 `7 / 218.078 ≈ 0.032` 路径进度（7.79°），**校验像素时必须先扣掉这个渗出量**，否则正确渲染
+也会被判成越界。
+
 ### Wi-Fi 与数字换位
 
 `swap_wifi_value` 打开后，`drawInto` 的两个「槽位」互换：
@@ -235,6 +406,47 @@ Miuix 的 `MiuixPopupHost` 从 `LocalRootDialogStates` / `LocalDialogStates` 读
 Wi-Fi 搬进缺口是靠 canvas 变换（`translate` + `scale`）完成的，几何常量仍是原始那套绝对值；
 闪电居中同理（`boltCentreOffsetX/Y` + `BOLT_CENTRE_SCALE`）。两者都在 `save()`/`restoreToCount()`
 里做变换，和 `drawBolt` 的既有写法一致。
+
+### 网络类型：环内与环外
+
+`mobile_type_mode` 三档：`0` 关闭、`1` 环内、`2` 环外。**选项顺序即存储值**。
+
+- **环内**（`1`）走渲染器：`TrioRenderer.drawInto` 的决策块在
+  `cfg.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING && hasType && !wifi && !boltInCentre`
+  时把网络类型放进圆心（`TrioRenderer.java:137`），电量数字让位到顶部缺口。它**不查
+  `show_value`** —— 与闪电（`showBolt && showValue`）不同。
+- **环外**（`2`）不是 canvas 绘制。宿主画布只有 `battery_meter_width = 28dp` ×
+  `status_bar_icon_height = 20dp`，装不下环外的字，所以模块**自己往电池容器里新增一个
+  `TextView`**：`TrioHooks.OutTypeLabel`（`TrioHooks.java` 的 `out-of-ring type label` 区块）。
+  挂点是 `batteryContainerOf(host)` 返回的 `MiuiStatusBatteryContainer` —— 选它是因为
+  `MiuiStatusBatteryContainer.onMeasure/onLayout` 只量/摆自己那几个具名字段、
+  **从不遍历 `childAt`**，因此第 4 个子视图不会被量也不会被摆，手工 `layout()` 的位置能保住；
+  容器还带 `clipChildren="false"`，越界也画得出来。
+
+**绝不能挂到 `MiuiStatusIconContainer`**：它的 `onLayout` 第一遍把所有 child 的 x 归零，第二遍
+又把每个 child 强转 `StatusIconDisplayable`（外来视图直接 `ClassCastException`）。同理也不能用
+`WeakHashMap<View, TextView>` 缓存 label —— value 里的 `View.getParent()` 强引用回 key，条目永远
+回收不掉；这里改用「子视图 `instanceof OutTypeLabel`」当标记。
+
+挂载/摘除只发生在 posted 路径（`applyConfigChange`、`registerHost`、`invalidateHosts`），因为
+`settle()` 是从 `onLayout` 里调的，在那儿 `addView` 会触发
+`requestLayout() improperly called during layout`。`settle` 里只调 `refreshOutTypeLabel`，它发现
+文本/字号需要变时**只排队一次 posted sync**（`setText`/`setTextSize` 会 re-measure → 调度布局，
+同样不能在 `onLayout` 内做），否则只更新颜色与位置。
+
+字号用 `setTextSize(TypedValue.COMPLEX_UNIT_PX, cfg.typeSize * TrioRenderer.inkScale(w, h))`：
+**必须显式 `COMPLEX_UNIT_PX`**，单参 `setTextSize(float)` 默认按 SP 解释。`inkScale` 是
+`TrioRenderer` 里为环外标签抽出的包级 helper（`TrioRenderer.java:425`），与画布同一套 120×120
+设计空间缩放，所以环外的字和环内的字视觉大小一致。宿主尚未测量（`inkScale <= 0`）时跳过挂载，
+下一次 posted sync 自愈。文本为空时置 `GONE` 而非移除 —— 网络类型随 modem 来去，每次布局
+add/remove 太吵。
+
+`typeSize` / `typeWeight` 两个尺寸项**两种模式共用**（设置页在 `mobileTypeMode == 0` 时置灰）。
+`show_mobile_type` 是废弃的旧布尔键，仅用于迁移读取（见配置项参考）。
+
+已知风险：原生 `mobile_type_single` 是 mobile 槽组的子级，而 `foldedSlots()` 不包含
+`mobile_type`，所以「关闭显示移动信号点 + 环外」时可能同时看到原生与自建两个标签。环内模式不会
+冲突 —— 它一定伴随 mobile 槽折叠。
 
 ### 配色
 
@@ -263,10 +475,12 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 
 ### 原生图标抑制
 
-两条通道叠加。
+两条通道叠加，两者都**按子开关**决定折叠哪些槽位（`TrioHooks.foldedSlots()`：`show_wifi` → `wifi`；
+`show_mobile` → `mobile` + `stacked_mobile`；总开关关闭时为空集）。
 
-1. `MiuiStatusIconContainer.addIgnoredSlots` 追加 `"wifi"` / `"mobile"` / `"stacked_mobile"`
-   —— 让容器在 `onMeasure` 时把它们排除出 `measureViews`。
+1. `MiuiStatusIconContainer` 的 `ignoredSlots` 列表 —— 让容器在 `onMeasure` 时把它们排除出
+   `measureViews`。`syncSlots()` 让该列表与子开关**双向**对齐：补上缺失的，并**移除**不再需要的。
+   移除才是「交还」的关键：MIUI 会为所有未被忽略的槽位重新布局并定位。
 2. 仅靠 (1) 不够：`MiuiStatusIconContainer.onLayout` 第一趟会把**每个**孩子放在容器局部 `x=0`，
    后续趟只重定位「可见且未 blocked 且不在 `ignoredSlots`」的孩子，被忽略的孩子永远停在容器
    左边缘 —— 而状态栏容器因为 `MiuiNotificationStatusContainer.onMeasure` 的半屏测量，左边缘
@@ -277,11 +491,49 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 `ModernStatusBarView.isIconVisible()` 只由 binding 与动画标志决定，与 `getVisibility()` 无关，
 所以 GONE 单独用是无效的 —— 必须配合 `ignoredSlots`，反之亦然。
 
+**交还**（子开关关闭时）必须把上面两步都撤销：(1) 从 `ignoredSlots` 移除该槽，
+(2) 把 `COLLAPSED` 里登记过的孩子恢复 `VISIBLE`，然后 `requestLayout()` 让 MIUI 重排。
+`settle()` 与 `restoreNative()` 都只对**自己登记过**（`COLLAPSED`）的孩子恢复可见性：MIUI 自己
+隐藏的图标（无 SIM、关 Wi-Fi、飞行模式）从不登记，绝不能被复活。至于折叠期留下的 `0×0` 布局，
+不必手工纠正 —— 槽位一旦不在 `ignoredSlots` 里，MIUI 就会重新测量并布局它。
+
 `system_icons.xml` 被 7 个布局 include（状态栏 / 锁屏 / 控制中心 / 两个 QS 头部 / CC fake），
 每个都膨胀出独立实例，所以这条规则挂在 `MiuiStatusIconContainer` **类**上而不是某个实例上，
 一次覆盖全部宿主；`insets` 变化时 `MiuiPhoneStatusBarView.updateCutoutLocation` 会用
-`setIgnoredSlots(RIGHT_BLOCK_LIST)` 清空列表，故在 `onLayout` 每趟用 `ensureFolded` 补齐
-（只在缺项时才调 `addIgnoredSlots`，因为它结尾无条件 `requestLayout()`）。
+`setIgnoredSlots(RIGHT_BLOCK_LIST)` 清空列表，故在 `onLayout` 每趟用 `ensureFolded` 补齐。
+`ensureFolded` 同样是双向的，并且**只在确有差异时才调用 `syncSlots`**：`addIgnoredSlots` 结尾
+无条件 `requestLayout()`，每趟盲目追加会造成无限布局循环。
+
+### 充电闪电的交还
+
+闪电不是状态栏槽位，而是 `MiuiBatteryMeterView` 的孩子，所以它走另一条路。
+
+模块把电池样式钉成 0（见 `hyperduo-style`），而 MIUI 的原生闪电**只在 style 1/2 下被测量**：
+`onMeasure` 里那句 `measureChildWithMargins(mBatteryChargingView, ...)` 带 style 条件，所以
+style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会显示。`updateChargeAndText` 同样
+按 style 决定闪电可见性，`onLayout` 也按 style 决定是否把它排在电池视图之后。
+
+因此交还的做法是**用反射直接写 `mBatteryStyle = BOLT_STYLE(1)`**，而不是调用
+`onBatteryStyleChanged(1)`。原因是后者 style-1 分支会 `mBatteryIconView.setVisibility(8)` ——
+而 `mBatteryIconView` 正是字形绘制的宿主，走那条路等于用「交还闪电」换掉字形。直接写字段则同时
+点亮 `onMeasure`（测量闪电）、`updateChargeAndText`（按电量状态显示闪电）与 `onLayout`（排到
+电池视图右侧，即系统默认位置）三条路径，而完全不碰宿主可见性。全固件只有构造函数与
+`onBatteryStyleChanged` 会给 `mBatteryStyle` 赋值，所以这次覆写不会被别处悄悄改回去。
+
+谓词是 `enabled && showBolt && showValue`（`TrioRenderer` 画闪电的条件），即**当且仅当字形真的
+画出闪电时才压制原生闪电**。实现分两处，都必须用同一规则，否则会把刚交还的闪电又藏回去：
+`hyperduo-style`（style 变更时）与 `hyperduo-charge-text`（`updateChargeAndText` 每次重跑时）。
+设置变更时由 `applyMeterText()` 补齐，并按 `showValue`/总开关分别处理闪电与百分比容器。
+
+**总开关关闭时必须先把 `mBatteryStyle` 清成 `-1`**（构造函数自己的初值），再透传真实样式。
+否则会卡住 MIUI 自己的还原：`onBatteryStyleChanged` 的主体在 `if (mBatteryStyle != i3)` 门内，
+而 `handBackBolt` 之前已把字段写成 1；若真实样式恰好也是 1，这道判断为假，主体被跳过，
+`:641/:642`（普通图标 VISIBLE、hollow GONE）不执行 —— 可 `handBackBolt` 留下的正是这个组合，
+本该是 style 1 的「hollow 开、普通图标关」，于是 hollow 电池轮廓永远回不来。清成 `-1` 是唯一能
+让那道门通过的状态。
+
+百分比容器（`mBatteryPercentContainer`）只在 style 3 下被测量和显示，而模块从不请求 style 3，
+所以模块开着时它只能是隐藏的。
 
 ### 只压制「自己的」容器
 
@@ -310,11 +562,11 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 | id | 目标 | 作用 |
 | --- | --- | --- |
 | `hyperduo-container` | `MiuiPhoneStatusBarView.onFinishInflate` | 捕获权威的状态栏图标容器 |
-| `hyperduo-icon-layout` | `MiuiStatusIconContainer.onLayout` | 折叠 slot + 压制原生信号视图（覆盖全部宿主）+ 采样 Wi-Fi 有无 |
+| `hyperduo-icon-layout` | `MiuiStatusIconContainer.onLayout` | 按子开关同步 slot + 压制原生信号视图（覆盖全部宿主）+ 采样 Wi-Fi 有无 |
 | `hyperduo-draw` | `MiuiBatteryMeterIconView.onDraw` | 清画布 + 绘制字形 |
 | `hyperduo-detach` | `MiuiBatteryMeterIconView.onDetachedFromWindow` | 注销宿主 |
-| `hyperduo-style` | `MiuiBatteryMeterView.onBatteryStyleChanged` | 强制样式 0，并还原 `mStoreRealStyle` |
-| `hyperduo-charge-text` | `MiuiBatteryMeterView.updateChargeAndText` | 隐藏原生充电/百分比视图 |
+| `hyperduo-style` | `MiuiBatteryMeterView.onBatteryStyleChanged` | 强制样式 0，还原 `mStoreRealStyle`；需要时交还原生闪电 |
+| `hyperduo-charge-text` | `MiuiBatteryMeterView.updateChargeAndText` | 按 `show_bolt`/`show_value` 隐藏原生充电/百分比视图 |
 | `hyperduo-cutout` | `MiuiPhoneStatusBarView.updateCutoutLocation` | 重新追加被 `setIgnoredSlots` 清掉的 slot |
 | `hyperduo-signal` | `MiuiStatusBarIconViewHelper.transformResId` | 读取 Wi-Fi / 移动信号等级并触发重绘 |
 | `hyperduo-mobile-type` | `MobileTypeDrawable.measure` | 读 `mMobileType`（网络类型 3G/4G/5G…）并触发重绘 |
@@ -335,7 +587,8 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 | --- | --- | --- |
 | `enabled` | `true` | — |
 | `show_wifi` / `show_mobile` / `show_value` / `show_bolt` | `true` | — |
-| `show_mobile_type` | `false` | — |
+| `mobile_type_mode` | `0`（关闭） | 0 – 2（关闭 / 环内 / 环外） |
+| `show_mobile_type` | `false` | 已废弃，只读用于迁移 |
 | `swap_wifi_value` | `false` | — |
 | `role_colors` | `true` | — |
 | `color_critical_on_dark` / `color_critical_on_light` | `0xFFFF3B30` | — |
@@ -356,8 +609,12 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 - 仅在 HyperOS 4 / 小米 14（`CP2A.260605.016`，SDK 37，`OS4.0.0.27.XNCCNXM`）上验证过；其他
   固件可能类名或字段名不同，届时会退化为对应 hook 组打日志跳过。
 - 折叠集合按类名/slot 字符串硬编码（`wifi` / `mobile` / `stacked_mobile`）。若后续固件引入新的
-  移动槽位名，需要在 `TrioHooks.FOLDED_SLOTS` 里补一项；`DEBUG_DUMP = true` 可以打印出实际
-  slot 名。
+  移动槽位名，需要在 `TrioHooks.MANAGED_SLOTS` 里补一项，并在 `foldedSlots()` 里归属到对应的
+  子开关；`DEBUG_DUMP = true` 可以打印出实际 slot 名。
+- 子开关的「交还」依赖 `MiuiStatusIconContainer.ignoredSlots` 可读可写（反射）：读不到该字段时
+  `syncSlots` 退化为只追加，于是子开关只能压制、不能交还（等同旧行为）。
+- 原生充电闪电的交还依赖 `mBatteryStyle` 被直接改写：这在 MIUI 自身不重新派发 style 变更时成立。
+  若用户在系统设置里改了电池样式，`hyperduo-style` 会重跑并重新按子开关决定是否交还。
 - Wi-Fi 与移动信号等级来自 `MiuiStatusBarIconViewHelper.transformResId` 的原始 resId
   （`getResourceEntryName` 解析尾位数字）；若固件改走别的绑定路径，环内会退化为不显示对应
   弧/点（不会崩溃）。Wi-Fi 的**有无**另有实时采样兜底，不受此限制。
@@ -383,7 +640,9 @@ build.ps1                              旧离线构建（已弃用，保留查�
 work\jadx-out\                         MiuiSystemUI 反编译源（分析用，不入库）
 work\unpacked\                         MiuiSystemUI 解包资源（分析用，不入库）
 work\geocheck\                         离线段渲染与解析校验（不入库）
+work\gapcheck\                         电量环缺口像素校验与前后对照图（不入库）
 work\preview\                          离线 JVM 预览工装（不入库）
+work\overview\                         全部支持样式的状态总览图（不入库）
 .tools\                                JDK / Gradle / SDK / 本地 Maven 仓库
 .ref\                                  参考模块与 libxposed 源码（分析用，不入库）
 ```
@@ -401,6 +660,35 @@ work\preview\                          离线 JVM 预览工装（不入库）
    症状是画布变换泄漏到后续所有绘制）。
 2. **上机验证**：`install.ps1` 装机后重启 SystemUI，看日志与状态栏实拍。
 
+另有 `work\gapcheck\verify.ps1`（不入库）专门盯**电量环缺口**：它把同一份 `GapProbe` 跑两遍 —— 一遍
+编工作树的 `TrioRenderer`，一遍把 `batteryRing` 单独换回旧算法（其余代码不动，免得测到另一个程序）。
+`GapProbe` 用反射直接驱动真渲染器并沿环心线回读像素，按「可见弧」区间模型逐档断言 0–100% 的左右末端、
+缺口内是否无墨，再走 `drawInto` 的槽位决策做端到端确认。固定版必须 `exit 0`、旧算法必须
+`exit 1`（旧算法在 45/55/60/70/75% 上共 42 项不符）——**两边都跑才说明探针真的在测这个 bug**；
+只跑通过的那一边等于没有反例。探针同时产出 `work\gapcheck\out\mouth-{old,new}.png` 对照图。
+
+另有 `work\overview\run.ps1`（不入库）：把渲染器**实际支持的每一个样式**画成一张状态总览图
+`work\overview\out\overview.png`（1788×2926，4 组共 37 格）。它复用 `work\preview` 的桌面垫片，
+每格都以 `TrioSettings.defaults()` 为底再叠加该格的单项 tweak，因此代表的始终是出厂外观。用途有二：
+一是改渲染器后一眼看全所有样式的回归（新样式没进这张图就等于没被清点），二是给用户/文档出图。
+出图脚本会打印被编译的 `TrioRenderer.java` 的 SHA256，便于确认图对应哪份代码。
+
+**当前支持样式的清单**（即总览图的四组，也是渲染器能力的边界）：
+
+- 电池（顶部）10 格：充电中 / 快速充电 / 用电中（数字）/ 低电量 / 低电量模式 / 危险电量 /
+  已充满 / 只显示圆环 / 无 Wi-Fi 时数字居中 / 无 Wi-Fi 时充电且数字居中。
+- Wi-Fi（中部）7 格：已连接 3 格 / 2 格 / 1 格 / Wi-Fi 开启未关联 / Wi-Fi 关闭或不可用 /
+  Wi-Fi 与数字换位 / 换位后充电（闪电居中）。
+- 移动信号与网络类型 8 格：信号 4 格 / 2 格 / 无信号 / 网络类型环内 4G / 环内 5G / 环内 5GA /
+  类型关闭 / 类型环外。**环外类型不由本 Canvas 绘制** —— 它由 `TrioHooks` 另建的
+  `OutTypeLabel extends TextView` 画在电池表左侧，所以那一格是手绘标签示意，不是渲染器输出。
+- 外观与几何 12 格：浅色外观 / 深色外观 / 状态颜色关闭（单色）/ 底纹浓度 0 与 255 /
+  环线粗细 4 与 16 / 数字字号 16 与 44 / 类型字号 44 / 弧线粗细 3 与 16。
+
+参考的 macOS 版总览图里还有两组本模块**没有实现**，不要误画：**蓝牙音频**（4 格）与**音量**（7 格）
+在 `app\src\main\java\com\hyperduo\trio` 下搜 `volume|bluetooth|audio|headset|earbud` 无任何匹配。
+此外参考图的「已连接电源，未充电」也无对应状态 —— 渲染器只有充电 / 未充电两态，不区分插电未充。
+
 ## 验证记录
 
 - 几何离线校验（渲染）：`work\geocheck\geocheck.png` 通过。
@@ -413,6 +701,176 @@ work\preview\                          离线 JVM 预览工装（不入库）
   为「大闪电居中 + 数字缩到顶部缺口」，开 Wi-Fi 时 Wi-Fi 弧缩进缺口；切换即时生效，无需重启。
 - 更新器上机验证：无 Release 时点「检查更新」显示「作者尚未发布任何正式版本」（404 视为正常
   空答案而非失败），界面不卡死、不误报。
+- 更新器端到端验证（真机）：把 debug 包故意装成 0.9(900)，走完「检查更新 → 下载更新 → 安装」，
+  版本变为 1.0(10000)。设备到 github.com 时快时慢（同一 asset 在 1.5s 与 15s 超时之间摇摆），
+  故下载先打 `api.github.com/repos/…/releases/assets/<id>`（配 `Accept: application/octet-stream`，
+  实测 10/10 成功），失败再退到 `browser_download_url`，每个 URL 重试 3 次。
+- 安装被拒的两条路径分开处理：`InstallResult.NeedsPermission`（缺「安装未知应用」授权）弹出提示
+  并跳到该设置页；`InstallResult.NoInstaller`（设备上没有能处理安装 intent 的应用）只弹提示，
+  不跳设置页 —— 授权已经给出时把用户送去设置页会让他面对一个无处可改的界面。
 - release 构建注入验证：`-PhyperduoVersionName=1.2 -PhyperduoVersionCode=10200` 产出的 APK
   经 `aapt2 dump badging` 确认 `versionCode='10200' versionName='1.2'`；解包后 `dexdump` 确认
   hook 侧与更新器全部类均未被 R8 剥离。
+- 重启按钮：`assembleDebug` 通过，`aapt2 dump resources` 确认 `restart_title` / `restart_summary` /
+  `restart_confirm` / `restart_running` / `restart_done` / `restart_failed` / `cancel` 七个串在中英
+  两个 locale 都已打包（`values` 与 `values-en` 均命中）。上机（小米 14 / HyperOS 4 / Android 17 /
+  KernelSU）确认：顶栏右侧 `Refresh` 图标按钮渲染正常、与状态栏图标不冲突；点开后确认弹窗按
+  `OverlayDialog` 形态渲染（标题、正文、灰「取消」+ 蓝「重启」双按钮）；`am force-stop` 后冷启动
+  不误触，`restarting` 初值正确。root 通路单独验证通过：`su -c 'killall com.android.systemui'`
+  退出码 0，SystemUI 随后重新起来。**弹窗落在屏幕底部而非居中**——这是 Miuix 的限制不是本模块的
+  bug：`DialogContentLayout` 只在窗口宽 ≥ 840dp 时才用 `Alignment.Center`，手机上恒为
+  `BottomCenter`，且 `OverlayDialog` / `WindowDialog` 都没有暴露 alignment 参数。**仍待补**：
+  「拒绝授权 → 弹窗留在原位并显示失败」「kill 进行中取消/确认按钮均不可点，点击外部与返回键都不
+  关闭弹窗」两条交互路径。
+- 颜色恢复默认确认：`assembleDebug` 通过，`aapt2 dump resources` 确认 `color_reset_dialog_summary` /
+  `color_reset_confirm` 两个新串在中英两个 locale 都已打包。上机（小米 14 / Android 17 / KernelSU）
+  确认颜色页「恢复默认」行渲染正常；**弹窗本身的上机截图未取到**——验证过程中设备 USB 掉线
+  （`adb devices` 变空），点击「恢复默认」后的那一步没能截到图。同样的 `OverlayDialog` + 取消/确认
+  双按钮形态已在重启弹窗上截到过（见上一条），但这两条确认通路各自仍需一次真机点击确认。
+- 顶栏模糊：`assembleDebug` 通过；merge 后的 manifest（`processDebugMainManifest` 与
+  `processDebugManifestForPackage` 两处）确认 `<uses-sdk android:minSdkVersion="29"
+  android:targetSdkVersion="36" />`，即 `tools:overrideLibrary` 生效、minSdk 未被 blur 的 33 顶上去。
+  上机（小米 14 / Android 17 / API 37）静置与滚动两态截图确认：顶栏后是页面内容被磨砂糊开
+  （预览卡片图标透出为色块），不再是纯色底；滚动时卡片内容从标题下穿过并保持模糊。
+  **未在 API 29–32 设备上验证**——该分支只能确认编译与 manifest，实际分支是否退化成不透明底依赖
+  真机或模拟器。
+- 门控提示（Tooltip）：语义层用 `uiautomator dump` 验证——总开关关闭时恰好 3 个
+  `long-clickable="true"` 节点（充电时显示闪电 / 显示网络类型 / Wi-Fi 与数字换位），打开后为 0，
+  与「只有确实存在未打开前置开关的行才响应长按」的预期一致。**提示气泡本身未截到图**：
+  取图前设备掉线，长按路径未走通；`gateHint` 的文案拼接由代码路径保证。
+- Snackbar 替换 Toast：`assembleDebug` / `compileDebugKotlin --rerun-tasks` 均通过且无警告。
+  **提示条本身未截到图**——它只在更新安装失败或重启完成时弹出，前者需要远端存在新 Release，
+  后者会真的重启 SystemUI，都不适合为取图而触发。
+- miuix-nav 接入：`assembleDebug` 通过（JDK 21 + JVM target 21）。解包 APK 后按 dex 字符串确认
+  三件事都进了包：`miuix/kmp/nav/core/NavDisplayKt` 与 `NavController`、`NavBackStackKt`
+  （`classes6.dex`），以及本模块的 `Route$General`、`SettingsPage`（`classes4.dex`）。
+  已 `adb install -r` 装机成功（小米 14，设备在线）。
+  **导航的运行时行为未做视觉验证**——按用户要求本轮不截图、不重启 SystemUI。因此以下各条
+  只有编译期与打包期的证据，实际观感待补：分区切换的转场动画、系统/预测返回手势的分区回退、
+  顶栏模糊在 `NavDisplay` 改为内容宿主后是否仍正确采样、
+  以及标签条高亮与栈顶路由是否始终一致。（转场后来返工成零位移交叉淡入，见下一条；
+  「切标签后落在哪里」后来由用户定成一律回到顶部，见第四次返工。）
+- 导航转场（第一次上机后返工）：首版直接用了库预设 `NavTransitions.MiuixDefault`，用户截图
+  判定「问题太大了」——整页被横推、被覆盖分区残留在左边缘。改为 `SectionTransition`
+  原地交叉淡入 + `SectionEffects`（无裁角、无 scrim），`compileDebugKotlin` / `assembleDebug`
+  均通过且零警告，已 `adb install -r` 装机。**这次改动同样只有编译期证据**：`adb shell input
+  tap`/`keyevent` 与 `adb shell monkey -f` 在本机都被 MIUI 在 OS 层拦下，逐字报错
+  `java.lang.SecurityException: Injecting input events requires the caller (or the source of the
+  instrumentation, if any) to have the INJECT_EVENTS permission`（`monkey` 另外还要求 COUNT 位置
+  参数，缺了报 `** Error: Count not specified`），所以「点一下标签看转场」这一步无法由我完成，
+  最终观感由用户目视确认。
+- 导航布局（第二次返工）：用户指出「做简单的导航动画即可,不要影响界面布局了」，即转场不得
+  以改变页面结构为代价。于是把上一轮为了「只动标签页以下部分」而钉在 `NavDisplay` 之外的
+  `preview` + 标签条收回每个目的地自己的 `LazyColumn`（`sectionHeader()`），页面恢复成
+  「一条列表，前两行是预览卡与标签条」，与引入导航之前同形。`NavDisplay` 因此直接
+  `fillMaxSize()` 并承接 `.layerBackdrop(barBackdrop)` / `.nestedScroll(...)`——原来挂在
+  中间那层 `Column` 上的两个修饰符随该 `Column` 一并删除。`sectionPadding.top` 从 `12.dp`
+  改为 `padding.calculateTopPadding() + 12.dp`：状态栏内边距原先由 Scaffold 施加在外层
+  `Column` 上，现在必须由列表自己让开。
+  验证：`compileDebugKotlin` / `assembleDebug` 通过且零警告；APK SHA256
+  `EB5552BF…8CE63B`（上一版 `8A0CE291…E4E00B6`），`adb install -r` Success；冷启动
+  `mCurrentFocus` 落在 `MainActivityAlias`、`pidof` 有进程、logcat 无 `FATAL EXCEPTION` /
+  `No entry` / `Duplicate contentKey`。**静止态布局与改动前逐像素一致**（见上文两次 dump 的
+  `bounds` 对比），这一条是本轮唯一可自证的验收点。转场观感同前，仍待用户目视。
+- 导航覆盖穿透（第三次返工）：用户报告「不同标签页会覆盖上一个标签页的内容在底层」。
+  根因是**交叉淡入与透明列表不相容**：`opaqueDepth = 1f` 刻意让被覆盖层继续组合并绘制
+  （窗口 `-1 < d <= opaqueDepth`），而两个 `LazyColumn` 尺寸位置完全相同，被覆盖层只能被上层
+  **真正画出的像素**遮住——卡片间 12dp 间隙与较短分区尾部的大片空白什么都盖不住，
+  上一分区于是从那里透出。`Scaffold` 只提供一层底色，在只有一个列表的年代够用。
+  修复：给 `SectionList` 的 `LazyColumn` 加 `.background(MiuixTheme.colorScheme.surface)`
+  （`SettingsScreen.kt:606`），与 `Scaffold` 同色，静止态逐像素不变。
+  验证：`assembleDebug` 通过且零警告；APK SHA256 `3CFDDE1E…0605`（上一版 `EB5552BF…8CE63B`），
+  `adb install -r` Success；`javap -c` 确认 `BackgroundKt` / `background` / `getSurface` 已进字节码
+  （排除「没重新编译」）；冷启动 `mCurrentFocus` 落在 `MainActivityAlias`、`pidof` 有进程、
+  logcat 无崩溃；dump `v1.xml` 31613 B 与修复前 `ui4.xml` 完全同尺寸（General 静止态节点未变）。
+  **装机版本已核对**：`adb pull` 出设备上的 `/data/app/…/base.apk`，SHA256 与本地 APK 逐字相同
+  （都是 `3CFDDE1E…0605`），即设备上跑的确实是含本次修复的构建。
+  注意：事后一次「最终重编」失败，报 `SettingsRepository.kt:91/133 Unresolved reference 'KEY_TYPE_SIZE'`
+  与 `SettingsScreen.kt:796 Unresolved reference 'setOutTypeSize'`——那是**并发的另一个 DSH session**
+  正在改 `Prefs.java` / `TrioSettings.java` / `SettingsRepository.kt` 中途留下的未完成状态，
+  与本轮修复无关（我的 `.background(...)` 在 `SettingsScreen.kt:606` 仍在）。已安装的 APK 是
+  那次失败构建**之前**的产物，因此设备上的版本不受影响；在此仓库与他人并发写文件时，
+  任何时刻的 `assembleDebug` 结果都要先确认不是别人改到一半的状态。
+  **判据是库契约而非截图**：`isVisibleAt(1f, 1f)` 为 true，所以被覆盖层在**静止态也一直组合、
+  一直绘制**（不只是转场期间）——这正是「点完另一个标签后旧内容长驻底层」这种报告的原因。
+  转场之外我无法自证：切标签需要注入输入，而本机 `input` 只能在当前前台窗口生效（见下一条更正），
+  不能在用户可能正用手机时调用。
+- **更正上文关于输入注入的结论。** 之前记录「`adb shell input tap` / `keyevent` / `monkey` 在本机
+  全被 MIUI 拦下」只对**非 root** 成立：本机 `su` 可用（`/system/bin/su`，`uid=0(root) … context=u:r:ksu:s0`），
+  `adb shell "su -c 'input tap X Y'"` 能成功注入。但它**无法指定目标窗口**，只会打到当时的
+  前台窗口——我试过一次，当时前台是用户的 QQ（`com.tencent.mobileqq/…SplashActivity`，
+  稍后变成 `…av.ui.AVActivity`），那一击落在了聊天界面上。**因此它不能用于本 app 的定向验证，
+  除非先确认焦点在自己 app 上；不应在用户可能正在使用手机时调用。** 已验证过、也仍然安全的
+  观察手段是：`dumpsys window | Select-String mCurrentFocus`、`pidof`、`logcat -d`、
+  `uiautomator dump` + `adb pull`、`screencap -p` 到文件再 `pull`（`exec-out screencap` 会损坏 PNG）。
+- 导航滚动位置（第四次返工）：用户一句「不要记录页面位置」。上一轮刚把「每个目的地各留各的偏移」
+  写成了正确语义（见上文条目），这一轮按用户口径推翻：切标签一律回到列表顶部。
+  改动只在 `SectionList`（`SettingsScreen.kt:572-587`）：多收一个 `isTop: Boolean`，
+  加 `LaunchedEffect(isTop) { if (isTop) listState.scrollToItem(0) }`；四个 entry
+  （`SettingsScreen.kt:467/475/483/497`）各自传 `isTop = nav.backStack.lastOrNull() == Route.Xxx`。
+  **键必须是 `isTop` 而不是 `Unit`**：条目被覆盖时仍在组合，`LaunchedEffect(Unit)` 只在创建它的
+  那次组合里跑一次，之后成为栈顶不会再触发。
+  验证：`assembleDebug` BUILD SUCCESSFUL 且零警告；`javap -c` 里出现
+  `LazyListStateKt.rememberLazyListState` 与 `SettingsScreenKt$SectionList$1$1.<init>:(Z…Continuation;)V`
+  （那个 `Z` 就是 `isTop`，证明 lambda 确实捕获了它而不是常量）；`SectionList` 签名变为
+  `(PaddingValues, boolean, Function1<LazyListScope, Unit>, Composer, int)`。
+  APK 33359674 B，SHA256 `BD2C2E96E7DBB196D6E4F004C9F05E100A0471C8E52445F9DD9FF1A605DD933C`
+  （上一版 `3CFDDE1E…0605`；体积变大是因为**并发的另一个 DSH session** 的「外环字号」功能
+  同时进了这一版，其 `Prefs.java` / `TrioSettings.java` / `SettingsRepository.kt` 已改完并通过编译）。
+  `adb install -r` Success；冷启动 `mCurrentFocus` 落在 `MainActivityAlias`、`pidof` = 2675、
+  logcat 干净。**装机版本已核对**：`adb pull` 设备 base.apk 到 `.tmp\installed2.apk`，
+  SHA256 与本地同为 `BD2C2E96…933C`。
+  「回到顶部」这一步的实际手感仍需用户目视——切换标签要注入输入，无法自证。
+- **构建环境变更**：`.tools\jdk\jdk-21.0.12.1+1`（Temurin 21.0.12.1+1，从 Adoptium 下载，195.6 MB）
+  是新增的，`env.ps1` / `build.ps1` / `release.ps1` / 本文档的 `JAVA_HOME` 都已从 JDK 17 改为它。
+  JDK 17 目录**保留未删**，但已不被任何脚本引用。
+- 电量环缺口（本轮修复）：用户报告「电量环在中间断开后，应该是左右两半各 50%，现在的逻辑不对，
+  会把中间显示为其他图标的位置也算作电量区域了」。根因是 `TrioRenderer.batteryRing` 里
+  `level/100` 被当成**整条路径**的进度直接用，缺口宽度没有从 `to` 里补偿回来。
+  改为按可见弧长换算（见「几何」一节）。验证走 `work\gapcheck\verify.ps1`：
+  同一份 `GapProbe` 跑两遍，固定版 `exit 0`（63 档扫描 + 12 项端到端全绿），
+  只把 `batteryRing` 换回旧算法的对照版 `exit 1`（42 项不符，45% 就已填满左半环、
+  55/60/65% 右半环完全不起弧）——**反例成立**才说明探针在测这个 bug 而不是恒真。
+  `javac -source 8 -target 8 -bootclasspath android.jar` 编 10 个 hook 源 `exit 0`；
+  `gradle --offline assembleDebug` `exit 0`。**探针第一版曾因端帽误判**（见下条教训）。
+- 教训（端帽）：探针第一版按手工取点分类左右段，在 45%/50% 上报了大量假失败，原因是
+  `STROKE` 是 `Paint.Cap.ROUND`，每段末端向外多渗半个笔画宽（`stroke = 14` 时约 0.032 路径进度、
+  7.79°）。凡是「看着渲染器明明正确、断言却失败」的像素校验，**先怀疑端帽**，改成区间模型并
+  从点亮末端扣掉 `cap` 再比。这条同样适用于 `centreClearWidth` / `gapClearWidth` 之外的任何
+  像素级判定。
+- 电量环缺口**上机验证**（小米 14 / houji / Android 17 / HyperOS 4 / KernelSU）：`install.ps1
+  -InstallOnly` Success，`adb pull` 设备 `base.apk` 与本地 SHA256 逐字相同
+  （`E9FB1EDF5918048C974988DA254A675CDF798FBFDE905D81A23C3EE97AF814B0`，33359674 B），
+  且 APK (18:25:42) 晚于 `TrioRenderer.java` (17:19:26)——设备上跑的确含本次修复。
+  SystemUI 重启后 `HyperDuo installed, hooks=9 enabled=true`，无 `FATAL EXCEPTION`。
+  两帧定量测量（`work\ondevice\measure.ps1` / `m60b.ps1`：按颜色分类像素 → 代数拟合圆心半径 →
+  映射到路径进度 `t` → 输出连续区间；`TrioGeometry.B_START=148.69008689281117`、
+  `B_SWEEP=242.6198262143777`）：
+  - **52%**（真实电量，充电中）：绿 `0.002..0.398` 与 `0.666..0.744`，灰含 `0.445..0.999`。
+    `u = 0.52 × 0.65 = 0.338`，左段应到 `min(u, m0=0.325)`、右段应从 `0.675` 起画
+    `0.013` 残段——两段都出现，缺口内部无绿。
+  - **60%**（`dumpsys battery set level 60` 强制值，判别性帧）：绿 `0.001..0.325`（左，止于
+    `m0`）+ **右半环绿 0.675..0.783 共 96 个采样**，灰 `0.384..0.623` 等。固定版预测
+    `u = 0.39` → 右段 `0.675..0.740`（含端帽到 0.772），实测吻合。**这一帧是判别性的**：
+    旧算法 `to = 0.60 < m1 = 0.675` 时右半环一个像素都不画，与实测的 96 个绿采样互斥。
+    目视见 `work\ondevice\lv60-fixed-8x.png`（8x）：左半环绿满、右半环从缺口右缘起一小截绿、
+    其余为灰轨道。缺口内部仅 3 个采样落在 `0.357..0.643`（495 个中的抗锯齿边缘像素）。
+  **强制电量必须还原**：`set level` 是全局持久状态，要写成
+  `dumpsys battery set level 60; sleep 2; screencap -p /sdcard/x.png; dumpsys battery reset`
+  **同一条 `adb shell`**，否则中途掉线/中断会把手机卡在假电量上（本轮真发生过一次，
+  重插 USB 后 `reset` 才清掉，前后读回都是 `level: 47`）。
+  拟合圆心时另有两条坑：只用绿像素拟合会退化（绿只有两段短弧），而把「中性灰」阈值放宽到
+  `mx >= 90` 会把背景 `#656563` 一起算成轨道（13144 px，圆心被拖到背景里）。正确做法是先按
+  目视取粗略圆心做环形预筛（`18 < d < 34`）再拟合，且背景灰度必须排除。
+- **全量样式总览图**（对照 macOS 版 `Status Trio` 总览图出的图）：`work\overview\run.ps1`
+  `exit 0`，`work\overview\out\overview.png`，`1788×2926`，4 组共 **37 格**，
+  `renderer = 207c17d0acd87680d15ae959e3525e7849027bdc58b12ae4c13a2dc3ca36820a`
+  （即出图时 `TrioRenderer.java` 的 SHA256，用来确认图对应哪份代码）。放大目视核对
+  `crop-battery.png`(2x) / `crop-critical.png`(3x) / `crop-mobile.png`(2x) / `crop-look.png`(2x)
+  逐格正确。**清点结论**：参考图的「蓝牙音频」4 格与「音量」7 格在本模块无任何实现
+  （`volume|bluetooth|audio|headset|earbud` 零匹配），「已连接电源，未充电」也没有对应状态
+  （渲染器只有充电 / 未充电两态），这三类都不应画进图里 —— 详见「测试」一节的样式清单。
+- 教训（出图也会溢出）：总览图页脚前两版都**超出右边界被静默裁掉**，肉眼在图缩略图上根本看不出。
+  改成 `footerLine(...)` 先 `getFontMetrics().stringWidth` 量宽、超宽直接 `throw`，
+  立刻报出 `footer line overflows the page by 49px`。凡是定宽排版出图，都要让"画不下"变成
+  异常而不是裁剪。

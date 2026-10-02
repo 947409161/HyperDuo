@@ -1,10 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Only the settings app talks to the network, to ask GitHub for the newest
          release. The hooked SystemUI process never gets this permission because
          it is granted per-package, and the hooks make no network calls. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Declaring this is what lets PackageManager.canRequestPackageInstalls()
+         ever answer true; without it the check is false forever and the updater
+         cannot even hand the downloaded APK to the system installer. It grants no
+         ability to install silently: the user still confirms in the system dialog,
+         and on MIUI they must first flip "install unknown apps" for this app. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- miuix-blur declares android:minSdkVersion="33" because its effects need
+         RuntimeShader. We keep 29: every effect in the library is gated on
+         isRuntimeShaderSupported() at runtime and silently falls back to plain
+         drawing below API 33, so the older floor costs only the blur itself. -->
+    <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <application
         android:name=".HyperDuoApp"

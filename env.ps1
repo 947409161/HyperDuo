@@ -3,7 +3,12 @@
 #   . C:\code\HyperDuo\env.ps1
 
 $env:HYPERDUO_ROOT = 'C:\code\HyperDuo'
-$env:JAVA_HOME    = 'C:\code\HyperDuo\.tools\jdk\jdk-17.0.20.1+1'
+# JDK 21, not 17: Miuix ships Java 21 (class file major 65) bytecode, and the Kotlin
+# compiler refuses to inline a 21-targeted function into 17-targeted output. The
+# nav entry points (rememberNavController, entry) are inline composables, so the
+# build cannot go below 21 while miuix-nav is in the dependency list. javac has to
+# be 21 as well: AGP rejects a Java/Kotlin target mismatch outright.
+$env:JAVA_HOME    = 'C:\code\HyperDuo\.tools\jdk\jdk-21.0.12.1+1'
 $env:ANDROID_HOME = 'C:\code\HyperDuo\.tools\sdk'
 $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 $env:GRADLE_USER_HOME = 'C:\code\HyperDuo\.tools\gradle-home'
@@ -20,7 +25,7 @@ $env:ADB = 'C:\Program Files\UotanToolbox\Bin\platform-tools\adb.exe'
 
 function apktool { & "$env:JAVA_HOME\bin\java.exe" -jar 'C:\code\HyperDuo\.tools\bin\apktool.jar' @args }
 function jadx    { & 'C:\code\HyperDuo\.tools\bin\jadx\bin\jadx.bat' @args }
-function java17  { & "$env:JAVA_HOME\bin\java.exe" @args }
+function java21  { & "$env:JAVA_HOME\bin\java.exe" @args }
 function gradle  { & "$env:GRADLE_HOME\bin\gradle.bat" @args }
 function adb     { & $env:ADB @args }
 

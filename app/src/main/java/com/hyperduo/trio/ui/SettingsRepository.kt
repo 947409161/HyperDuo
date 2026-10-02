@@ -1,6 +1,7 @@
 package com.hyperduo.trio.ui
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.content.edit
@@ -45,8 +46,9 @@ class SettingsRepository(context: Context) {
     fun setShowMobile(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_MOBILE, value)
     fun setShowValue(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_VALUE, value)
     fun setShowBolt(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_BOLT, value)
-    fun setShowMobileType(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_MOBILE_TYPE, value)
     fun setSwapWifiValue(value: Boolean) = writeBoolean(Prefs.KEY_SWAP_WIFI_VALUE, value)
+    /** 0 = hidden, 1 = inside the ring, 2 = outside it. */
+    fun setMobileTypeMode(value: Int) = writeInt(Prefs.KEY_MOBILE_TYPE_MODE, value)
 
     // ----------------------------------------------------------------- colours
 
@@ -76,6 +78,7 @@ class SettingsRepository(context: Context) {
             prefs.putInt(Prefs.KEY_COLOR_LOW_ON_DARK, Prefs.DEF_COLOR_LOW_ON_DARK)
             prefs.putInt(Prefs.KEY_COLOR_LOW_ON_LIGHT, Prefs.DEF_COLOR_LOW_ON_LIGHT)
         }
+        notifyModule()
     }
 
     // ------------------------------------------------------------------ sizing
@@ -86,6 +89,7 @@ class SettingsRepository(context: Context) {
     fun setValueSize(value: Int) = writeInt(Prefs.KEY_VALUE_SIZE, value)
     fun setValueWeight(value: Int) = writeInt(Prefs.KEY_VALUE_WEIGHT, value)
     fun setTypeSize(value: Int) = writeInt(Prefs.KEY_TYPE_SIZE, value)
+    fun setOutTypeSize(value: Int) = writeInt(Prefs.KEY_OUT_TYPE_SIZE, value)
     fun setTypeWeight(value: Int) = writeInt(Prefs.KEY_TYPE_WEIGHT, value)
     fun setTrackAlpha(value: Int) = writeInt(Prefs.KEY_TRACK_ALPHA, value)
 
@@ -111,7 +115,7 @@ class SettingsRepository(context: Context) {
             prefs.putBoolean(Prefs.KEY_SHOW_MOBILE, snapshot.showMobile)
             prefs.putBoolean(Prefs.KEY_SHOW_VALUE, snapshot.showValue)
             prefs.putBoolean(Prefs.KEY_SHOW_BOLT, snapshot.showBolt)
-            prefs.putBoolean(Prefs.KEY_SHOW_MOBILE_TYPE, snapshot.showMobileType)
+            prefs.putInt(Prefs.KEY_MOBILE_TYPE_MODE, snapshot.mobileTypeMode)
             prefs.putBoolean(Prefs.KEY_SWAP_WIFI_VALUE, snapshot.swapWifiValue)
 
             prefs.putBoolean(Prefs.KEY_ROLE_COLORS, snapshot.roleColors)
@@ -128,21 +132,48 @@ class SettingsRepository(context: Context) {
             prefs.putInt(Prefs.KEY_VALUE_SIZE, snapshot.valueSize)
             prefs.putInt(Prefs.KEY_VALUE_WEIGHT, snapshot.valueWeight)
             prefs.putInt(Prefs.KEY_TYPE_SIZE, snapshot.typeSize)
+            prefs.putInt(Prefs.KEY_OUT_TYPE_SIZE, snapshot.outTypeSize)
             prefs.putInt(Prefs.KEY_TYPE_WEIGHT, snapshot.typeWeight)
             prefs.putInt(Prefs.KEY_TRACK_ALPHA, snapshot.trackAlpha)
 
             prefs.putBoolean(Prefs.KEY_DEBUG_LOG, current.getBoolean(Prefs.KEY_DEBUG_LOG, Prefs.DEF_DEBUG_LOG))
         }
+        notifyModule()
     }
 
     private fun writeBoolean(key: String, value: Boolean) {
         preferences().edit(commit = true) { putBoolean(key, value) }
         push { it.putBoolean(key, value) }
+        notifyModule()
     }
 
     private fun writeInt(key: String, value: Int) {
         preferences().edit(commit = true) { putInt(key, value) }
         push { it.putInt(key, value) }
+        notifyModule()
+    }
+
+    /**
+     * Tells the hooked process to re-read the settings, carrying the whole
+     * snapshot in the intent.
+     *
+     * <p>This is a second, callback-independent path: the framework's
+     * remote-preference change callback is the intended mechanism, but it has
+     * been observed to stop reaching SystemUI on device - the daemon database
+     * held the new value while the status bar kept drawing the old one. The
+     * broadcast is sent even when the service is not bound, because the hooked
+     * process is up regardless and only needs the extras.
+     *
+     * <p>Delivery is asynchronous, so no ordering against [push] is needed; both
+     * carry the same values.
+     */
+    private fun notifyModule() {
+        runCatching {
+            val intent = Intent(Prefs.ACTION_RELOAD)
+                .setPackage(Prefs.SYSTEMUI_PACKAGE)
+                .putExtras(TrioSettings.from(preferences()).toBundle())
+            appContext.sendBroadcast(intent)
+        }.onFailure { Log.w(TAG, "cannot notify the hooked process", it) }
     }
 
     /** Applies [block] to the framework's remote preferences, if connected. */

@@ -1,6 +1,12 @@
 package com.hyperduo.trio;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.os.Build;
+import android.os.Bundle;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +52,9 @@ public final class TrioConfig {
 
     private static volatile SharedPreferences sPrefs;
     private static volatile boolean sDebugLog = Prefs.DEF_DEBUG_LOG;
+
+    /** Guards {@link #installReceiver}: registration must happen exactly once. */
+    private static volatile boolean sReceiverInstalled;
 
     // Values are published together, so a reader never sees a mixed snapshot.
     private static volatile TrioSettings sSnapshot = TrioSettings.defaults();
@@ -100,15 +109,119 @@ public final class TrioConfig {
     }
 
     /**
-     * The framework fires once per changed key; each fires its own
-     * onSharedPreferenceChanged, so a debounce would only add latency. Re-read
-     * the small snapshot directly instead.
+     * Listens for the settings app's explicit reload broadcast, the
+     * callback-independent second path for a changed setting.
+     *
+     * <p>The framework's remote-preference callback is the intended mechanism and
+     * stays in place, but it has been observed to stop reaching the hooked process
+     * on device: the daemon database held the new {@code enabled} value while
+     * SystemUI kept drawing the trio glyph from the old snapshot. The broadcast
+     * carries the whole snapshot, so it cannot half-apply.
+     *
+     * <p>Idempotent: whichever hooked view calls it first wins; later calls are
+     * no-ops, so registering from every relevant lifecycle callback is safe.
+     *
+     * @param context a SystemUI context, which is only reachable from inside a
+     *                hook callback - not from {@code install}.
+     */
+    static void installReceiver(Context context) {
+        if (context == null || sReceiverInstalled) {
+            return;
+        }
+        // The view this is called from can live in a window context that SystemUI
+        // tears down and rebuilds (status bar, keyguard, a re-inflated bar), and a
+        // receiver registered on one of those dies with it. The application context
+        // lives as long as the process, which is what the one-shot registration
+        // below assumes; fall back to what we were handed if it is unavailable.
+        final Context app = context.getApplicationContext();
+        final Context target = (app != null) ? app : context;
+        sReceiverInstalled = true;
+        try {
+            final BroadcastReceiver receiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context ctx, Intent intent) {
+                    onReloadBroadcast(intent);
+                }
+            };
+            final IntentFilter filter = new IntentFilter(Prefs.ACTION_RELOAD);
+            if (Build.VERSION.SDK_INT >= 33) {
+                // The sender is a different app, so the receiver has to be
+                // exported. That does mean any app can forge this intent; the
+                // worst it can do is change how this user's own status bar is
+                // drawn, which is the same thing the settings app is allowed to
+                // do, so no further guard is warranted here.
+                target.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                target.registerReceiver(receiver, filter);
+            }
+            TrioHooks.log(TrioHooks.LOG_INFO, "reload receiver registered");
+        } catch (Throwable t) {
+            sReceiverInstalled = false;
+            TrioHooks.log(TrioHooks.LOG_WARN, "cannot register reload receiver: " + t);
+        }
+    }
+
+    /**
+     * Applies a snapshot delivered by broadcast.
+     *
+     * <p>Deliberately does not touch {@link #sPrefs}: the local cache is not
+     * writable and cannot be updated from here. When the framework's own callback
+     * does work it delivers the same values, so the two paths agree.
+     *
+     * <p>The two paths cannot fight over the result. Ordering them is not enough
+     * on its own - the framework callback applies only the key it reports,
+     * precisely because its map can be stale for every other key - so this
+     * broadcast is what carries a key that callback never delivered. A later
+     * framework callback for an unrelated key therefore leaves this snapshot
+     * intact instead of reverting it.
+     */
+    private static void onReloadBroadcast(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        try {
+            final Bundle extras = intent.getExtras();
+            if (extras == null || !extras.containsKey(Prefs.KEY_ENABLED)) {
+                // A bundle without the master switch is not one this module sent
+                // and would move state on a stranger's behalf. Checked with
+                // containsKey rather than Bundle.isEmpty(), which is API 31 while
+                // this module declares minSdk 29.
+                TrioHooks.log(TrioHooks.LOG_WARN, "reload broadcast without extras, ignored");
+                return;
+            }
+            // Seeded from the current snapshot: a key the sender omitted keeps the
+            // value it already had instead of snapping back to a shared default.
+            final TrioSettings previous = sSnapshot;
+            final TrioSettings incoming = TrioSettings.fromBundle(extras, previous);
+            sDebugLog = incoming.debugLog;
+            sSnapshot = incoming;
+            if (sDebugLog) {
+                TrioHooks.log(TrioHooks.LOG_INFO,
+                        "reload broadcast: enabled=" + incoming.enabled
+                                + " ring=" + incoming.ringStroke
+                                + " arc=" + incoming.arcStroke
+                                + " size=" + incoming.valueSize
+                                + " (was enabled=" + previous.enabled + ")");
+            }
+            notifyChanged();
+        } catch (Throwable t) {
+            TrioHooks.log(TrioHooks.LOG_WARN, "bad reload broadcast: " + t);
+        }
+    }
+
+    /**
+     * The framework fires once per changed key. Only that key's value is
+     * guaranteed fresh - see {@link TrioSettings#applyKeyFrom} - so it is applied
+     * on its own rather than by re-reading the whole snapshot, which would
+     * re-publish stale values for every key whose diff never arrived.
      */
     private static final SharedPreferences.OnSharedPreferenceChangeListener LISTENER =
             new SharedPreferences.OnSharedPreferenceChangeListener() {
                 @Override
                 public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
-                    reload();
+                    if (!applyKey(prefs, key)) {
+                        return;
+                    }
                     if (sDebugLog) {
                         TrioHooks.log(TrioHooks.LOG_INFO,
                                 "remote pref changed: " + key
@@ -121,6 +234,36 @@ public final class TrioConfig {
                 }
             };
 
+    /**
+     * Copies one key's fresh value into the published snapshot.
+     *
+     * @return true when the snapshot changed, so listeners need notifying
+     */
+    private static boolean applyKey(SharedPreferences prefs, String key) {
+        if (prefs == null || key == null) {
+            return false;
+        }
+        try {
+            final TrioSettings next = sSnapshot.copy();
+            if (!next.applyKeyFrom(TrioSettings.from(prefs), key)) {
+                // Not a key this module renders with; nothing to repaint.
+                return false;
+            }
+            sDebugLog = next.debugLog;
+            sSnapshot = next;
+            return true;
+        } catch (Throwable t) {
+            // A type mismatch in the framework's cast must never break drawing.
+            TrioHooks.log(TrioHooks.LOG_WARN, "cannot read preferences: " + t);
+            return false;
+        }
+    }
+
+    /**
+     * Reads the whole configuration once, when the framework connects. A full
+     * read is right here and only here: the map is authoritative at install time
+     * and nothing has been published yet that it could be stale against.
+     */
     private static void reload() {
         SharedPreferences prefs = sPrefs;
         if (prefs == null) {

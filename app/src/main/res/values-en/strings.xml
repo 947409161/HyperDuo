@@ -13,19 +13,22 @@
     <string name="master_summary">Master switch. Turn off to restore the stock battery and signal icons.</string>
 
     <string name="show_wifi_title">Show Wi-Fi arcs</string>
-    <string name="show_wifi_summary">Draw the Wi-Fi arcs; the number of arcs follows the real signal level.</string>
+    <string name="show_wifi_summary">Draw the Wi-Fi arcs; the number of arcs follows the real signal level. Turn off to send the stock Wi-Fi icon back to its usual place in the status bar.</string>
 
     <string name="show_mobile_title">Show mobile dots</string>
-    <string name="show_mobile_summary">Draw four level dots for mobile network signal strength.</string>
+    <string name="show_mobile_summary">Draw four level dots for mobile network signal strength. Turn off to send the stock mobile icon back to its usual place in the status bar.</string>
 
     <string name="show_value_title">Show battery number</string>
-    <string name="show_value_summary">Show the battery percentage inside the ring; replaced by a bolt while charging.</string>
+    <string name="show_value_summary">Show the battery percentage inside the ring; replaced by a bolt while charging. Turn off to give the charging bolt back to the system as well.</string>
 
     <string name="show_bolt_title">Bolt while charging</string>
-    <string name="show_bolt_summary">When off, the percentage stays visible while charging.</string>
+    <string name="show_bolt_summary">Turn off to drop the bolt from the ring and let the stock charging bolt show next to the battery icon instead.</string>
 
-    <string name="show_mobile_type_title">Show network type</string>
-    <string name="show_mobile_type_summary">With no Wi-Fi, show 3G/4G/5G in the middle of the ring and move the battery number back to the top.</string>
+    <string name="show_mobile_type_title">Network type</string>
+    <string name="show_mobile_type_summary">Where to show the network type label: off, inside the ring, or as a separate icon elsewhere in the status bar.</string>
+    <string name="mobile_type_off">Off</string>
+    <string name="mobile_type_inside">In the ring</string>
+    <string name="mobile_type_outside">Outside the ring</string>
 
     <string name="swap_wifi_value_title">Swap Wi-Fi and number</string>
     <string name="swap_wifi_value_summary">Enlarge the percentage into the middle of the ring and shrink the Wi-Fi arcs into the top notch; while charging the big bolt takes the middle.</string>
@@ -42,6 +45,8 @@
     <string name="color_dialog_summary">Set the color used when the status bar sits on a dark or a light background.</string>
     <string name="color_reset">Reset to default</string>
     <string name="color_reset_summary">Restore the three state colors to their factory presets.</string>
+    <string name="color_reset_dialog_summary">All three state colors go back to their factory presets; your custom colors will be overwritten.</string>
+    <string name="color_reset_confirm">Reset</string>
     <string name="color_preview">Preview</string>
 
     <string name="low_threshold_title">Low battery threshold</string>
@@ -61,6 +66,9 @@
 
     <string name="type_size_title">Network type size</string>
     <string name="type_size_summary">Font size of the 3G/4G/5G label in the ring centre.</string>
+
+    <string name="out_type_size_title">Out-of-ring size</string>
+    <string name="out_type_size_summary">Font size of the 3G/4G/5G label shown outside the ring, in the status bar.</string>
 
     <string name="type_weight_title">Network type weight</string>
     <string name="type_weight_summary">Stroke weight of the network type, 100 lightest to 900 heaviest.</string>
@@ -97,19 +105,30 @@
 
     <string name="update_title">Check for updates</string>
     <string name="update_summary_idle">Fetches the newest release from GitHub.</string>
-    <string name="update_check">Check for updates</string>
     <string name="update_checking">Checking…</string>
     <string name="update_uptodate">Up to date — %1$s</string>
     <string name="update_available">Version %1$s is available</string>
     <string name="update_available_summary">Installed %1$s · %2$s</string>
     <string name="update_download">Download</string>
     <string name="update_downloading">Downloading %1$d%%</string>
-    <string name="update_ready">Downloaded — tap to install</string>
+    <string name="update_ready">The new version has been downloaded.</string>
     <string name="update_ready_summary">Android will ask you to confirm before installing.</string>
     <string name="update_install">Install</string>
     <string name="update_retry">Retry</string>
     <string name="update_failed">Could not check for updates</string>
     <string name="update_no_release">No release has been published yet</string>
     <string name="update_permission_needed">HyperDuo needs permission to install apps; the settings page has been opened for you.</string>
+    <string name="update_install_failed">No app on this device can handle the install.</string>
     <string name="update_release_page">Open release page</string>
+
+    <string name="restart_title">Restart System UI</string>
+    <string name="restart_summary">Restarting System UI reloads the module, which is what to do after installing it or when System UI misbehaves. It needs root access; System UI disappears for a moment and comes back on its own, without interrupting running apps.</string>
+    <string name="restart_confirm">Restart</string>
+    <string name="restart_running">Restarting…</string>
+    <string name="restart_done">System UI restarted</string>
+    <string name="restart_failed">Restart failed — make sure root access was granted</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Tooltip on a row greyed out by another setting; %1$s is that setting's name. -->
+    <string name="gate_hint">Turn on &quot;%1$s&quot; first</string>
 </resources>

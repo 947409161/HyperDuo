@@ -3,6 +3,7 @@ package com.hyperduo.trio.ui
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -29,10 +30,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
@@ -59,25 +60,51 @@ import com.hyperduo.trio.R
 import com.hyperduo.trio.TrioPreviewView
 import com.hyperduo.trio.TrioSettings
 import io.github.libxposed.service.XposedService
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.ColorPalette
+import top.yukonga.miuix.kmp.basic.Icon
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.LinearProgressIndicator
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.SnackbarDuration
+import top.yukonga.miuix.kmp.basic.SnackbarHost
+import top.yukonga.miuix.kmp.basic.SnackbarHostState
 import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.blur.textureBlur
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.nav.core.NavDisplay
+import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
+import top.yukonga.miuix.kmp.nav.core.NavKey
+import top.yukonga.miuix.kmp.nav.core.rememberNavController
+import top.yukonga.miuix.kmp.nav.transition.NavMotion
+import top.yukonga.miuix.kmp.nav.transition.NavSettleSpec
+import top.yukonga.miuix.kmp.nav.transition.NavTransition
+import top.yukonga.miuix.kmp.nav.transition.navGraphicsTransition
 import top.yukonga.miuix.kmp.overlay.OverlayDialog
 import top.yukonga.miuix.kmp.preference.ArrowPreference
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.preference.SliderPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
+import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.utils.PressFeedbackType
 
 /**
  * Inner padding of a preference row inside its Card. Miuix's Card carries no
@@ -85,6 +112,15 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * wants 18.dp against the card edge and a slightly tighter 14.dp vertical rhythm.
  */
 private val SettingsItemMargin = PaddingValues(horizontal = 18.dp, vertical = 14.dp)
+
+/**
+ * Blur radius of the top bar, in dp.
+ *
+ * Well above the library's 20.dp default because the bar is as tall as the
+ * status bar plus a large title: at a small radius the rows underneath stay
+ * legible and the bar reads as a translucent scrim rather than frosted glass.
+ */
+private val BarBlurRadius = 40f
 
 /**
  * Group heading. Miuix's [SmallTitle] defaults to a 28.dp vertical margin, which
@@ -112,23 +148,119 @@ private enum class RoleColor(val labelRes: Int) {
  * The page's top-level sections, in strip order. The label reuses the section
  * heading the group already had, so the strip reads as a table of contents for
  * the page rather than a second vocabulary for the same four things.
+ *
+ * Each section is also a destination on the nav back stack ([route]), which is
+ * what gives a section switch its own animated page change and gives the system
+ * back gesture something to pop. The routes' names and the strip's names are the
+ * same four words, but they are separate types on purpose: the label is a
+ * resource id, which has no business living on a value that gets serialized into
+ * the saved-state bundle.
  */
-private enum class SettingsTab(val labelRes: Int) {
-    General(R.string.tab_general),
-    Geometry(R.string.group_geometry),
-    Colors(R.string.group_colors),
-    About(R.string.about_title),
+private enum class SettingsTab(val labelRes: Int, val route: Route) {
+    General(R.string.tab_general, Route.General),
+    Geometry(R.string.group_geometry, Route.Geometry),
+    Colors(R.string.group_colors, Route.Colors),
+    About(R.string.about_title, Route.About),
 }
+
+/**
+ * Destinations of the settings back stack, one per section.
+ *
+ * Serialized data objects rather than a plain enum or class: miuix-nav keeps its
+ * stack in rememberSaveable and rebuilds it through a serializer, so every route
+ * has to round-trip. It also namespaces each route's saved state by the route's
+ * own toString(), and an object's toString() is its class name — stable across a
+ * process death, unlike the identity hash a plain class would print.
+ *
+ * The on-screen state that is not a place — the colour picker, the restart sheet,
+ * the reset prompt — deliberately stays a dialog. Those are prompts dismissed
+ * over the page, and pushing them would turn the back gesture into "cancel"
+ * instead of "go back a section".
+ */
+@Serializable
+private sealed interface Route : NavKey {
+    @Serializable
+    data object General : Route
+
+    @Serializable
+    data object Geometry : Route
+
+    @Serializable
+    data object Colors : Route
+
+    @Serializable
+    data object About : Route
+}
+
+/**
+ * The section change: the two sections cross-fade where they stand.
+ *
+ * The library's default preset moves a page — the entering section slides in
+ * full-width from the trailing edge, the outgoing one parallaxes a quarter width
+ * the other way, and the effects layer lays a 50% scrim over the lot. That is the
+ * right motion for arriving at a new screen and the wrong one here: the four tabs
+ * are four views of one page, and the strip above them never moves. Sliding them
+ * sideways reads as the page tearing in half.
+ *
+ * So this transition moves nothing. It only ramps the incoming layer's alpha up
+ * from 0 over the outgoing one, which stays fully opaque until it is covered. The
+ * two are the same size and sit in the same place, so the alpha alone reads as one
+ * section turning into the next.
+ *
+ * `relativeDepth` is the single driver: 0 at rest on top, -1 fully out above it,
+ * +1 fully covered by the layer above. Both directions therefore come out
+ * symmetric — a push fades the new section in over the old, a pop fades the
+ * revealed section back in the same way — with no per-direction branch.
+ *
+ * The covered branch still assigns alpha explicitly rather than leaving it alone:
+ * the block runs inside a retained `graphicsLayer`, so a property it stops setting
+ * keeps the value from the frame before — which would freeze the layer at the alpha
+ * of its last entering frame instead of letting it read as opaque.
+ */
+private val SectionTransition: NavTransition = navGraphicsTransition(
+    opaqueDepth = 1f,
+    // 220ms rather than the preset's 500ms: a section swap is a glance sideways,
+    // not a journey, and the default was tuned for a full page push.
+    motion = NavMotion(programmatic = NavSettleSpec.Tween(220, FastOutSlowInEasing)),
+) { scope ->
+    val d = scope.relativeDepth
+    alpha = if (d <= 0f) (1f + d).coerceIn(0f, 1f) else 1f
+}
+
+/**
+ * The transition above draws no scrim and rounds no corners, because there is
+ * nothing to separate: no layer ever sits on top of another here, and the corner
+ * clip exists to round the edge of a page sliding across the screen.
+ */
+private val SectionEffects = NavDisplayEffects(
+    enableCornerClip = false,
+    dimAmount = 0f,
+)
 
 @Composable
 fun SettingsScreen(repository: SettingsRepository) {
-    var settings by remember { mutableStateOf(repository.read()) }
-    var service by remember { mutableStateOf(HyperDuoApp.xposedService) }
+    // Kept as explicit state objects, not just `by` delegates, because the nav
+    // entries below are built once and remembered: an entry that closed over the
+    // *value* of settings would keep rendering the snapshot it was built with.
+    // Handing the entries these objects makes every read a real snapshot read,
+    // taken while the destination composes.
+    val settingsState = remember { mutableStateOf(repository.read()) }
+    var settings by settingsState
+    val serviceState = remember { mutableStateOf(HyperDuoApp.xposedService) }
+    var service by serviceState
     var editing by remember { mutableStateOf<RoleColor?>(null) }
-    // The ordinal rather than the enum itself, so a configuration change simply
-    // restores an Int instead of routing an enum through the saveable bundle.
-    var tabIndex by rememberSaveable { mutableIntStateOf(SettingsTab.General.ordinal) }
-    val listState = rememberLazyListState()
+    var resettingColors by remember { mutableStateOf(false) }
+    var restarting by remember { mutableStateOf(false) }
+
+    // The section the page is on *is* the top of the back stack, rather than a
+    // second piece of state kept in step with it: the strip and the system back
+    // gesture then read and write the same list, so they cannot disagree about
+    // where the user is.
+    //
+    // The supertype is spelled out because the reified parameter is otherwise
+    // inferred from the argument, and a stack declared as the first concrete
+    // route cannot hold the other three once the process is recreated.
+    val nav = rememberNavController<Route>(Route.General)
 
     // The framework service can bind or die at any moment; both the status row
     // and every remote write have to follow it.
@@ -145,6 +277,11 @@ fun SettingsScreen(repository: SettingsRepository) {
     val updater = remember(context) { UpdateController(context.applicationContext) }
     DisposableEffect(updater) { onDispose { updater.dispose() } }
 
+    // Same reasoning as the updater: the dialog can be dismissed mid-kill, and a
+    // root prompt that outlives the dialog still has to land somewhere.
+    val restarter = remember { RestartController() }
+    DisposableEffect(restarter) { onDispose { restarter.dispose() } }
+
     // Single funnel: apply the write, then re-read so the preview never shows a
     // value the repository did not accept (clamping happens on read).
     fun update(block: (SettingsRepository) -> Unit) {
@@ -152,59 +289,218 @@ fun SettingsScreen(repository: SettingsRepository) {
         settings = repository.read()
     }
 
-    val gated = settings.enabled
-    val tab = SettingsTab.entries[tabIndex]
+    // Switching section: tapping the one already open is a no-op rather than a
+    // second copy of it on the stack — the library rejects a repeated route, and
+    // the strip accepts taps faster than a transition runs. Going back to a
+    // section further down walks back to it instead of pushing it again, so the
+    // stack stays a path through the page rather than a log of every tap.
+    fun selectTab(next: SettingsTab) {
+        val backStack = nav.backStack
+        if (backStack.lastOrNull() == next.route) return
+        if (backStack.contains(next.route)) {
+            nav.popUntil { it == next.route }
+        } else {
+            nav.push(next.route)
+        }
+    }
 
-    // A tab is a different page's worth of rows; keeping the offset would drop
-    // the reader into the middle of the next one.
-    LaunchedEffect(tabIndex) { listState.scrollToItem(0) }
+    // The preview and the strip are the head of every section rather than a band
+    // pinned above the display. They then scroll away with the rows they belong
+    // to, which is how this page behaved before it had a back stack, and the
+    // display has no reason to reshape the page to run a transition over it.
+    //
+    // Being the same two rows in all four sections, they also cost the transition
+    // nothing: two copies fading through one another land on identical pixels.
+    fun LazyListScope.sectionHeader() {
+        item { PreviewCard(settingsState.value) }
+        item {
+            // Read here rather than taken from the enclosing scope: the entries
+            // are built once and remembered, so a value captured above would keep
+            // highlighting whichever section was open when the screen appeared.
+            val current = SettingsTab.entries.firstOrNull { it.route == nav.backStack.lastOrNull() }
+                ?: SettingsTab.General
+            val labels = SettingsTab.entries.map { stringResource(it.labelRes) }
+            TabRow(
+                tabs = labels,
+                selectedTabIndex = current.ordinal,
+                onTabSelected = { index -> selectTab(SettingsTab.entries[index]) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 
     val scrollBehavior = MiuixScrollBehavior(rememberTopAppBarState())
+    // Resolved here rather than inside the click lambda: a string resource needs
+    // a composable context, and the dialog is opened from a lambda.
+    val restartTitle = stringResource(R.string.restart_title)
+    val restartDone = stringResource(R.string.restart_done)
+
+    // Miuix's own host rather than a system toast: the snackbar is drawn on the
+    // same surface as the page that raised it, so it follows the theme and dies
+    // with the screen instead of hovering over whatever comes next.
+    //
+    // Short (4s) is the closest match to the LENGTH_LONG toasts these replaced;
+    // Miuix's Long runs ten seconds, which is a long time to look at one
+    // sentence, and the snackbar can be swiped away if even that is too long.
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    // Remembered so the row callbacks below capture one stable value: a lambda
+    // rebuilt every recomposition would make every row that takes it unstable.
+    val showMessage: (String) -> Unit = remember(scope, snackbarHostState) {
+        { message ->
+            scope.launch {
+                snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+            }
+            Unit
+        }
+    }
+
+    // The kill lands on System UI, not on this process, so the confirmation
+    // outlives the dialog and has to be shown from here.
+    LaunchedEffect(restarter.state) {
+        if (restarter.state is RestartState.Done) {
+            showMessage(restartDone)
+            restarting = false
+        }
+    }
+
+    // Hoisted out of the draw lambda below, which is not a composable scope and
+    // so cannot read the theme itself.
+    val surfaceColor = MiuixTheme.colorScheme.surface
+
+    // Blur needs a runtime shader (API 33). The library skips the effect itself
+    // on older devices, but that is not enough here: the blur is what replaces
+    // the bar's background, and the bar applies the modifier before that
+    // background, so an un-gated bar would end up with no background at all and
+    // the list would scroll straight through the title.
+    val barBlurSupported = isRuntimeShaderSupported()
+
+    // Remembered unconditionally: a conditional remember would break the slot
+    // table, and the layer costs nothing while nothing samples it.
+    //
+    // Keyed on the colour alone; rememberLayerBackdrop reads the draw lambda
+    // through rememberUpdatedState, so a fresh lambda per frame does not rebuild
+    // the backdrop and reset its coordinates.
+    val barBackdrop = rememberLayerBackdrop {
+        // The captured layer has to be opaque first. The page leaves its margins
+        // and the gaps between cards transparent, and blurring those pixels
+        // smears their neighbours' colour across the whole bar.
+        drawRect(surfaceColor)
+        drawContent()
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = stringResource(R.string.app_name),
+                // The blur is drawn by the modifier, which the bar applies before
+                // its own background, so the background has to get out of the
+                // way for the effect to be visible at all.
+                modifier = if (barBlurSupported) {
+                    Modifier.textureBlur(
+                        backdrop = barBackdrop,
+                        // The bar is flush with the screen edges, so there is no
+                        // corner for a rounded shape to round off.
+                        shape = RectangleShape,
+                        blurRadius = BarBlurRadius,
+                    )
+                } else {
+                    Modifier
+                },
+                color = if (barBlurSupported) Color.Transparent else surfaceColor,
                 largeTitle = stringResource(R.string.app_name),
                 scrollBehavior = scrollBehavior,
+                actions = {
+                    IconButton(
+                        // The dialog is the only place a kill can be started, so
+                        // a stale failure from last time must not greet the user.
+                        onClick = {
+                            restarter.reset()
+                            restarting = true
+                        },
+                    ) {
+                        Icon(imageVector = MiuixIcons.Refresh, contentDescription = restartTitle)
+                    }
+                },
             )
         },
         contentWindowInsets = WindowInsets.statusBars,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                start = 12.dp,
-                top = padding.calculateTopPadding() + 12.dp,
-                end = 12.dp,
-                bottom = padding.calculateBottomPadding() + 24.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item { PreviewCard(settings) }
+        val sectionPadding = PaddingValues(
+            start = 12.dp,
+            // The bar's inset belongs to the list now that the header is its first
+            // row: the preview used to be laid out outside the display, where the
+            // Scaffold's padding reached it.
+            top = padding.calculateTopPadding() + 12.dp,
+            end = 12.dp,
+            bottom = padding.calculateBottomPadding() + 24.dp,
+        )
 
-            item {
-                // The strip sits below the preview, so the glyph stays in
-                // view whichever tab is open: a setting and its effect can
-                // always be compared without scrolling back to the top.
-                val labels = SettingsTab.entries.map { stringResource(it.labelRes) }
-                TabRow(
-                    tabs = labels,
-                    selectedTabIndex = tabIndex,
-                    onTabSelected = { index -> tabIndex = index },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+        // The body of the page: one destination per section, each with its own
+        // list. Nothing is pinned above it, so the page keeps the shape it had
+        // before there was any navigation at all — the preview and the strip are
+        // simply the first two rows of whichever section is open.
+        //
+        // The default transition and its effects are replaced wholesale: they
+        // are built for arriving at a page, and these four entries are four
+        // views of one page. See [SectionTransition].
+        NavDisplay(
+            backStack = nav.backStack,
+            modifier = Modifier
+                .fillMaxSize()
+                // Both modifiers reach down into the display rather than
+                // sitting on a wrapper: the blur samples all of it, and the
+                // scroll listener has to be above the list — which lives one
+                // level down inside a destination — to hear the scroll that
+                // collapses the bar.
+                .layerBackdrop(barBackdrop)
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            onBack = { nav.pop() },
+            transition = SectionTransition,
+            effects = SectionEffects,
+        ) {
+            // Every entry reads settingsState/serviceState rather than a value
+            // captured here: the provider is remembered, so an entry built with a
+            // snapshot of the settings would go on showing that snapshot.
+            entry<Route.General> {
+                SectionList(sectionPadding, isTop = nav.backStack.lastOrNull() == Route.General) {
+                    sectionHeader()
+                    val s = settingsState.value
+                    generalTab(s, s.enabled) { block -> update(block) }
+                }
             }
 
-            when (tab) {
-                SettingsTab.General -> generalTab(settings, gated) { block -> update(block) }
-                SettingsTab.Geometry -> geometryTab(settings, gated) { block -> update(block) }
-                SettingsTab.Colors -> colorsTab(settings, gated, { block -> update(block) }) { role ->
-                    editing = role
+            entry<Route.Geometry> {
+                SectionList(sectionPadding, isTop = nav.backStack.lastOrNull() == Route.Geometry) {
+                    sectionHeader()
+                    val s = settingsState.value
+                    geometryTab(s, s.enabled) { block -> update(block) }
                 }
+            }
 
-                SettingsTab.About -> aboutTab(settings, service, updater) { block -> update(block) }
+            entry<Route.Colors> {
+                SectionList(sectionPadding, isTop = nav.backStack.lastOrNull() == Route.Colors) {
+                    sectionHeader()
+                    val s = settingsState.value
+                    colorsTab(
+                        settings = s,
+                        gated = s.enabled,
+                        update = { block -> update(block) },
+                        onEdit = { role -> editing = role },
+                        onReset = { resettingColors = true },
+                    )
+                }
+            }
+
+            entry<Route.About> {
+                SectionList(sectionPadding, isTop = nav.backStack.lastOrNull() == Route.About) {
+                    sectionHeader()
+                    val s = settingsState.value
+                    aboutTab(s, serviceState.value, updater, showMessage) { block ->
+                        update(block)
+                    }
+                }
             }
         }
 
@@ -236,6 +532,82 @@ fun SettingsScreen(repository: SettingsRepository) {
                 onDismiss = { editing = null },
             )
         }
+
+        RestartDialog(
+            controller = restarter,
+            show = restarting,
+            onDismiss = { restarting = false },
+        )
+
+        ResetColorsDialog(
+            show = resettingColors,
+            onDismiss = { resettingColors = false },
+            onConfirm = {
+                update { it.resetRoleColors() }
+                resettingColors = false
+            },
+        )
+    }
+}
+
+/**
+ * The scrolling body of one destination: the shared header and then the rows of
+ * whichever section this is.
+ *
+ * Each destination carries its own copy of the header — the preview and the strip
+ * are the same two rows everywhere — because they have to scroll with the list
+ * they belong to. A band pinned above the display would not: it would have to sit
+ * outside every destination, which is a different page shape from the one the rows
+ * were written for.
+ *
+ * The rows arrive as a [LazyListScope] builder rather than a composable so each
+ * section keeps contributing plain `item {}`s: the list owns their identity and
+ * therefore their state, and the shape of the four `*Tab` functions is unchanged.
+ *
+ * [isTop] is whether this destination is the section currently on screen — the top
+ * of the back stack. It gates the reset to the first row, so a section opens at the
+ * top every time the strip brings it forward rather than resuming where it was left.
+ */
+@Composable
+private fun SectionList(
+    contentPadding: PaddingValues,
+    isTop: Boolean,
+    content: LazyListScope.() -> Unit,
+) {
+    // A section is a place the reader arrives at, not a document they come back to:
+    // opening one starts at its first row. The offset therefore belongs to the visit
+    // and is not carried across — the entry stays composed while it is covered, so a
+    // list that kept its position would drop the reader into the middle of a section
+    // they had just chosen from the strip.
+    //
+    // Keyed on [isTop] rather than run once, because the same composed list is
+    // covered and uncovered as sections change; the reset has to happen on each
+    // arrival, not on the composition that happened to create it.
+    val listState = rememberLazyListState()
+    LaunchedEffect(isTop) {
+        if (isTop) listState.scrollToItem(0)
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            // Opaque, because a destination here is a whole page. The section being
+            // left stays composed and keeps being drawn underneath for the length of
+            // the transition — the visible window is `-1 < d <= 1`, deliberately wide
+            // enough to cross-fade from. Nothing else hides it: both lists are the same
+            // size and sit in the same place, so the covered one is covered only by the
+            // pixels the top one actually paints. A transparent list therefore lets the
+            // previous section show through the gaps between cards and below the end of
+            // a shorter section, which reads as the old tab lying under the new one.
+            //
+            // The same colour the Scaffold paints, which was doing this job alone while
+            // there was only ever one list to paint.
+            .background(MiuixTheme.colorScheme.surface),
+        contentPadding = contentPadding,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        content()
     }
 }
 
@@ -282,32 +654,62 @@ private fun LazyListScope.generalTab(
                 insideMargin = SettingsItemMargin,
                 enabled = gated,
             )
-            SwitchPreference(
-                checked = settings.showBolt,
-                onCheckedChange = { value -> update { it.setShowBolt(value) } },
-                title = stringResource(R.string.show_bolt_title),
-                summary = stringResource(R.string.show_bolt_summary),
-                insideMargin = SettingsItemMargin,
-                enabled = gated && settings.showValue,
+            // The rows below inherit the master gate, but the ones with a second
+            // dependency explain the specific switch that is holding them shut:
+            // "off because the master is off" is already visible on screen.
+            val valueGate = gateHint(
+                gated to R.string.master_title,
+                settings.showValue to R.string.show_value_title,
             )
-            SwitchPreference(
-                checked = settings.showMobileType,
-                onCheckedChange = { value -> update { it.setShowMobileType(value) } },
+            TooltipBox(text = valueGate.orEmpty(), enabled = valueGate != null) {
+                SwitchPreference(
+                    checked = settings.showBolt,
+                    onCheckedChange = { value -> update { it.setShowBolt(value) } },
+                    title = stringResource(R.string.show_bolt_title),
+                    summary = stringResource(R.string.show_bolt_summary),
+                    insideMargin = SettingsItemMargin,
+                    enabled = gated && settings.showValue,
+                )
+            }
+            // 0 = hidden, 1 = inside the ring, 2 = drawn outside the ring; the
+            // option list is ordered so its index is exactly the stored value.
+            //
+            // Gated on the master switch only, not on showValue the way the bolt
+            // row above is: the renderer picks the in-ring type centre slot
+            // without consulting showValue (TrioRenderer typeInCentre), and the
+            // out-of-ring label is a separate view entirely. Requiring the
+            // percentage would leave this row unreachable for no reason.
+            val typeModes = listOf(
+                stringResource(R.string.mobile_type_off),
+                stringResource(R.string.mobile_type_inside),
+                stringResource(R.string.mobile_type_outside),
+            )
+            OverlayDropdownPreference(
+                items = typeModes,
+                selectedIndex = settings.mobileTypeMode,
                 title = stringResource(R.string.show_mobile_type_title),
                 summary = stringResource(R.string.show_mobile_type_summary),
                 insideMargin = SettingsItemMargin,
-                enabled = gated && settings.showValue,
+                enabled = gated,
+                onSelectedIndexChange = { index -> update { repo -> repo.setMobileTypeMode(index) } },
             )
-            SwitchPreference(
-                checked = settings.swapWifiValue,
-                onCheckedChange = { value -> update { it.setSwapWifiValue(value) } },
-                title = stringResource(R.string.swap_wifi_value_title),
-                summary = stringResource(R.string.swap_wifi_value_summary),
-                insideMargin = SettingsItemMargin,
-                // Moving the arcs is pointless if either side of the swap is
-                // switched off, so the row needs both of them on.
-                enabled = gated && settings.showWifi && settings.showValue,
+            val swapHint = gateHint(
+                gated to R.string.master_title,
+                settings.showWifi to R.string.show_wifi_title,
+                settings.showValue to R.string.show_value_title,
             )
+            TooltipBox(text = swapHint.orEmpty(), enabled = swapHint != null) {
+                SwitchPreference(
+                    checked = settings.swapWifiValue,
+                    onCheckedChange = { value -> update { it.setSwapWifiValue(value) } },
+                    title = stringResource(R.string.swap_wifi_value_title),
+                    summary = stringResource(R.string.swap_wifi_value_summary),
+                    insideMargin = SettingsItemMargin,
+                    // Moving the arcs is pointless if either side of the swap is
+                    // switched off, so the row needs both of them on.
+                    enabled = gated && settings.showWifi && settings.showValue,
+                )
+            }
         }
     }
 }
@@ -347,40 +749,85 @@ private fun LazyListScope.geometryTab(
                 enabled = gated,
                 onValueChange = { v -> update { it.setValueSize(v) } },
             )
-            IntSlider(
-                value = settings.valueWeight,
-                min = Prefs.MIN_VALUE_WEIGHT,
-                max = Prefs.MAX_VALUE_WEIGHT,
-                title = stringResource(R.string.value_weight_title),
-                summary = stringResource(R.string.value_weight_summary),
-                // A 100..900 range would give the slider 799 steps, so
-                // it snaps in hundreds: the nine weights the platform
-                // actually ships distinct faces for.
-                step = WEIGHT_STEP,
-                enabled = gated && settings.showValue,
-                onValueChange = { v -> update { it.setValueWeight(v) } },
+            val weightHint = gateHint(
+                gated to R.string.master_title,
+                settings.showValue to R.string.show_value_title,
             )
-            IntSlider(
-                value = settings.typeSize,
-                min = Prefs.MIN_TYPE_SIZE,
-                max = Prefs.MAX_TYPE_SIZE,
-                title = stringResource(R.string.type_size_title),
-                summary = stringResource(R.string.type_size_summary),
-                // Only the centred type honours these, and it only
-                // appears when the network type is enabled at all.
-                enabled = gated && settings.showMobileType,
-                onValueChange = { v -> update { it.setTypeSize(v) } },
+            TooltipBox(text = weightHint.orEmpty(), enabled = weightHint != null) {
+                IntSlider(
+                    value = settings.valueWeight,
+                    min = Prefs.MIN_VALUE_WEIGHT,
+                    max = Prefs.MAX_VALUE_WEIGHT,
+                    title = stringResource(R.string.value_weight_title),
+                    summary = stringResource(R.string.value_weight_summary),
+                    // A 100..900 range would give the slider 799 steps, so
+                    // it snaps in hundreds: the nine weights the platform
+                    // actually ships distinct faces for.
+                    step = WEIGHT_STEP,
+                    enabled = gated && settings.showValue,
+                    onValueChange = { v -> update { it.setValueWeight(v) } },
+                )
+            }
+            // These two sizes drive the same glyph in two different spaces.
+            // The in-ring size is authored against the ring's 120x120 design
+            // space, so it tops out at 44; the out-of-ring label is laid out
+            // in the status bar's real pixel space and needs the wider 16..64
+            // range it carries on its own slider below. They are deliberately
+            // separate settings: one number cannot serve both spaces.
+            val typeSizeHint = gateHint(
+                gated to R.string.master_title,
+                (settings.mobileTypeMode != Prefs.MOBILE_TYPE_IN_RING) to
+                    R.string.show_mobile_type_title,
             )
-            IntSlider(
-                value = settings.typeWeight,
-                min = Prefs.MIN_TYPE_WEIGHT,
-                max = Prefs.MAX_TYPE_WEIGHT,
-                title = stringResource(R.string.type_weight_title),
-                summary = stringResource(R.string.type_weight_summary),
-                step = WEIGHT_STEP,
-                enabled = gated && settings.showMobileType,
-                onValueChange = { v -> update { it.setTypeWeight(v) } },
+            TooltipBox(text = typeSizeHint.orEmpty(), enabled = typeSizeHint != null) {
+                IntSlider(
+                    value = settings.typeSize,
+                    min = Prefs.MIN_TYPE_SIZE,
+                    max = Prefs.MAX_TYPE_SIZE,
+                    title = stringResource(R.string.type_size_title),
+                    summary = stringResource(R.string.type_size_summary),
+                    enabled = gated && settings.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING,
+                    onValueChange = { v -> update { it.setTypeSize(v) } },
+                )
+            }
+            // The out-of-ring label has its own size, live only when the label
+            // actually sits out of the ring.
+            val outTypeSizeHint = gateHint(
+                gated to R.string.master_title,
+                (settings.mobileTypeMode != Prefs.MOBILE_TYPE_OUT_RING) to
+                    R.string.show_mobile_type_title,
             )
+            TooltipBox(
+                text = outTypeSizeHint.orEmpty(),
+                enabled = outTypeSizeHint != null,
+            ) {
+                IntSlider(
+                    value = settings.outTypeSize,
+                    min = Prefs.MIN_OUT_TYPE_SIZE,
+                    max = Prefs.MAX_OUT_TYPE_SIZE,
+                    title = stringResource(R.string.out_type_size_title),
+                    summary = stringResource(R.string.out_type_size_summary),
+                    enabled = gated && settings.mobileTypeMode == Prefs.MOBILE_TYPE_OUT_RING,
+                    onValueChange = { v -> update { it.setOutTypeSize(v) } },
+                )
+            }
+            // The weight still applies in both positions.
+            val typeWeightHint = gateHint(
+                gated to R.string.master_title,
+                (settings.mobileTypeMode == 0) to R.string.show_mobile_type_title,
+            )
+            TooltipBox(text = typeWeightHint.orEmpty(), enabled = typeWeightHint != null) {
+                IntSlider(
+                    value = settings.typeWeight,
+                    min = Prefs.MIN_TYPE_WEIGHT,
+                    max = Prefs.MAX_TYPE_WEIGHT,
+                    title = stringResource(R.string.type_weight_title),
+                    summary = stringResource(R.string.type_weight_summary),
+                    step = WEIGHT_STEP,
+                    enabled = gated && settings.mobileTypeMode != 0,
+                    onValueChange = { v -> update { it.setTypeWeight(v) } },
+                )
+            }
             IntSlider(
                 value = settings.trackAlpha,
                 min = Prefs.MIN_TRACK_ALPHA,
@@ -404,6 +851,7 @@ private fun LazyListScope.colorsTab(
     gated: Boolean,
     update: ((SettingsRepository) -> Unit) -> Unit,
     onEdit: (RoleColor) -> Unit,
+    onReset: () -> Unit,
 ) {
     item {
         Card {
@@ -415,36 +863,51 @@ private fun LazyListScope.colorsTab(
                 insideMargin = SettingsItemMargin,
                 enabled = gated,
             )
-            IntSlider(
-                value = settings.lowThreshold,
-                min = Prefs.MIN_LOW_THRESHOLD,
-                max = Prefs.MAX_LOW_THRESHOLD,
-                title = stringResource(R.string.low_threshold_title),
-                summary = stringResource(R.string.low_threshold_summary),
-                enabled = gated && settings.roleColors,
-                onValueChange = { v -> update { it.setLowThreshold(v) } },
+            // One gate for the whole card: everything under the switch is
+            // meaningless while per-role colours are off, so they share the hint.
+            val roleGate = gateHint(
+                gated to R.string.master_title,
+                settings.roleColors to R.string.color_role_title,
             )
-            RoleColor.entries.forEach { role ->
-                ArrowPreference(
-                    title = stringResource(role.labelRes),
-                    summary = stringResource(role.colorFieldLabelRes),
-                    insideMargin = SettingsItemMargin,
-                    startAction = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Swatch(colorFor(settings, role, onDark = true))
-                            Swatch(colorFor(settings, role, onDark = false))
-                        }
-                    },
+            TooltipBox(text = roleGate.orEmpty(), enabled = roleGate != null) {
+                IntSlider(
+                    value = settings.lowThreshold,
+                    min = Prefs.MIN_LOW_THRESHOLD,
+                    max = Prefs.MAX_LOW_THRESHOLD,
+                    title = stringResource(R.string.low_threshold_title),
+                    summary = stringResource(R.string.low_threshold_summary),
                     enabled = gated && settings.roleColors,
-                    onClick = { onEdit(role) },
+                    onValueChange = { v -> update { it.setLowThreshold(v) } },
                 )
             }
-            ArrowPreference(
-                title = stringResource(R.string.color_reset),
-                summary = stringResource(R.string.color_reset_summary),
-                insideMargin = SettingsItemMargin,
-                onClick = { update { it.resetRoleColors() } },
-            )
+            RoleColor.entries.forEach { role ->
+                TooltipBox(text = roleGate.orEmpty(), enabled = roleGate != null) {
+                    ArrowPreference(
+                        title = stringResource(role.labelRes),
+                        summary = stringResource(role.colorFieldLabelRes),
+                        insideMargin = SettingsItemMargin,
+                        startAction = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Swatch(colorFor(settings, role, onDark = true))
+                                Swatch(colorFor(settings, role, onDark = false))
+                            }
+                        },
+                        enabled = gated && settings.roleColors,
+                        onClick = { onEdit(role) },
+                    )
+                }
+            }
+            TooltipBox(text = roleGate.orEmpty(), enabled = roleGate != null) {
+                ArrowPreference(
+                    title = stringResource(R.string.color_reset),
+                    summary = stringResource(R.string.color_reset_summary),
+                    insideMargin = SettingsItemMargin,
+                    enabled = gated && settings.roleColors,
+                    // Asks first: the reset throws away every custom colour at
+                    // once and there is no undo behind it.
+                    onClick = onReset,
+                )
+            }
         }
     }
 }
@@ -454,11 +917,12 @@ private fun LazyListScope.aboutTab(
     settings: TrioSettings,
     service: XposedService?,
     updater: UpdateController,
+    showMessage: (String) -> Unit,
     update: ((SettingsRepository) -> Unit) -> Unit,
 ) {
     item { ActivatedRow(settings = settings, service = service) }
     item { InfoCard(service = service) }
-    item { UpdateCard(updater) }
+    item { UpdateCard(updater, showMessage) }
     item {
         Card {
             SwitchPreference(
@@ -475,19 +939,23 @@ private fun LazyListScope.aboutTab(
 /**
  * The in-app updater.
  *
- * <p>The card is one heading, one status sentence describing the current state,
- * and one action button whose label is the verb that state calls for — check,
- * download, install or retry. A single button in a fixed place reads better than
- * a menu whose contents depend on a state the user cannot see.
+ * <p>The card is a short stack of Miuix preference rows, one per action the
+ * current state actually offers — check, download, install, open the release
+ * page — with the state itself spelled out as the summary of the first row.
+ * A row only exists while its verb is possible, so the card never shows an
+ * action that would do nothing, and it never says the same words twice the way
+ * a heading plus a button of the same name did.
  *
  * <p>The state lives in [updater], which the screen remembers, so scrolling this
  * card out of view and back does not restart a download in flight.
  */
 @Composable
-private fun UpdateCard(updater: UpdateController) {
+private fun UpdateCard(updater: UpdateController, showMessage: (String) -> Unit) {
     val state = updater.state
 
-    val status = when (state) {
+    // Null only for Ready, where the row's own title is already the whole status
+    // and a summary would print the same sentence a second time.
+    val status: String? = when (state) {
         is UpdateState.Idle -> stringResource(R.string.update_summary_idle)
         is UpdateState.Checking -> stringResource(R.string.update_checking)
         is UpdateState.UpToDate -> stringResource(R.string.update_uptodate, state.current)
@@ -498,7 +966,7 @@ private fun UpdateCard(updater: UpdateController) {
             (state.progress * 100f).toInt(),
         )
 
-        is UpdateState.Ready -> stringResource(R.string.update_ready_summary)
+        is UpdateState.Ready -> null
         // The raw reason is diagnostic text — an HTTP code, a socket error — and
         // would lose its meaning if it were run through a string resource.
         is UpdateState.Failed -> listOfNotNull(
@@ -507,130 +975,157 @@ private fun UpdateCard(updater: UpdateController) {
         ).joinToString(" · ")
     }
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(
-                text = stringResource(R.string.update_title),
-                style = MiuixTheme.textStyles.headline1,
+    // A download reports itself under the row it belongs to, where the bar spans
+    // the same width as the text instead of sitting in a slot of its own.
+    val progressBar: (@Composable () -> Unit)? = if (state is UpdateState.Downloading) {
+        {
+            LinearProgressIndicator(
+                // Null means the server never declared a length: the bar then
+                // animates instead of claiming a progress it does not have.
+                progress = state.progress.takeIf { it > 0f },
+                modifier = Modifier.fillMaxWidth(),
             )
-            Text(
-                text = status,
-                fontSize = 14.sp,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                modifier = Modifier.padding(top = 6.dp),
+        }
+    } else {
+        null
+    }
+
+    // Both states that are waiting on the network replace the row's arrow with a
+    // spinner, so the row still says "working" once the summary word has stopped
+    // being the thing the eye lands on. The branches are written out one by one
+    // because the arrow is the default and cannot be restored by passing null.
+    val busy = state is UpdateState.Checking || state is UpdateState.Downloading
+
+    // Each row is titled with the verb it performs, so a failure offers "retry"
+    // and a download in flight says "download", instead of both calling
+    // themselves "check for updates" while doing something else.
+    val rowTitle = when (state) {
+        is UpdateState.Downloading -> stringResource(R.string.update_download)
+        is UpdateState.Failed -> stringResource(R.string.update_retry)
+        // Not "check for updates": this row no longer offers a check, because a
+        // fresh check would drop the download the next row is about to install.
+        is UpdateState.Ready -> stringResource(R.string.update_ready)
+        else -> stringResource(R.string.update_title)
+    }
+
+    Card {
+        // The one row that is always there: it reports the state and, whenever
+        // nothing is in flight and nothing is waiting to be installed, offers
+        // another look at the release feed. It is also the retry action after a
+        // failure, because its summary is the failure — asking the user to press a
+        // second row called "retry" to find that out would be one row too many.
+        if (busy) {
+            ArrowPreference(
+                title = rowTitle,
+                summary = status,
+                insideMargin = SettingsItemMargin,
+                enabled = false,
+                endActions = {
+                    Box(
+                        modifier = Modifier.padding(end = 8.dp).size(26.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(size = 20.dp)
+                    }
+                },
+                bottomAction = progressBar,
             )
+        } else if (state is UpdateState.Ready) {
+            // Reporting only, and deliberately not tappable: checking again would
+            // replace "downloaded" with "up to date" and take the install row down
+            // with it, costing the user a second download of a file already on
+            // disk. The empty endActions removes the arrow, which would otherwise
+            // promise an action this row does not have.
+            ArrowPreference(
+                title = rowTitle,
+                summary = status,
+                insideMargin = SettingsItemMargin,
+                endActions = {},
+            )
+        } else {
+            ArrowPreference(
+                title = rowTitle,
+                summary = status,
+                insideMargin = SettingsItemMargin,
+                onClick = { updater.check() },
+            )
+        }
 
-            // Only a pending install needs the extra sentence: it is the one state
-            // where the user has to go and do something outside this card.
-            if (state is UpdateState.Ready) {
-                Text(
-                    text = stringResource(R.string.update_ready),
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-
+        if (state is UpdateState.Available) {
             // What the install would cost: the version being replaced and the
             // download size, so the choice can be made before tapping.
-            if (state is UpdateState.Available) {
-                Text(
-                    text = stringResource(
-                        R.string.update_available_summary,
-                        state.current,
-                        formatSize(state.info.apkSize),
-                    ),
-                    fontSize = 13.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-
+            val notes = state.info.notes.lines().firstOrNull { it.isNotBlank() }
             // The release notes are the only thing the user can weigh before
             // committing to an install, so a short excerpt earns its place.
-            if (state is UpdateState.Available && state.info.notes.isNotEmpty()) {
-                Text(
-                    text = state.info.notes.lines().firstOrNull { it.isNotBlank() }.orEmpty(),
-                    fontSize = 13.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
-
-            if (state is UpdateState.Downloading) {
-                LinearProgressIndicator(
-                    // Null means the server never declared a length: the bar then
-                    // animates instead of claiming a progress it does not have.
-                    progress = state.progress.takeIf { it > 0f },
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                when (state) {
-                    is UpdateState.Available -> {
-                        PrimaryAction(stringResource(R.string.update_download)) {
-                            updater.download(state.info)
-                        }
-                        SecondaryAction(stringResource(R.string.update_release_page)) {
-                            updater.openReleasePage(state.info.pageUrl)
-                        }
-                    }
-
-                    is UpdateState.Ready -> PrimaryAction(stringResource(R.string.update_install)) {
-                        // A refusal means the "install unknown apps" grant is
-                        // missing, and only the system settings page can grant it.
-                        if (!updater.install(state.file)) updater.openInstallPermissionScreen()
-                    }
-
-                    is UpdateState.Failed -> {
-                        PrimaryAction(stringResource(R.string.update_retry)) { updater.check() }
-                        SecondaryAction(stringResource(R.string.update_release_page)) {
-                            updater.openReleasePage(RELEASES_PAGE)
-                        }
-                    }
-
-                    // Idle, Checking, UpToDate and NoRelease all offer the same
-                    // thing: another look at the release feed.
-                    else -> PrimaryAction(
-                        label = stringResource(R.string.update_check),
-                        enabled = state !is UpdateState.Checking,
-                        onClick = { updater.check() },
+            val noteExcerpt: (@Composable () -> Unit)? = if (notes == null) {
+                null
+            } else {
+                {
+                    Text(
+                        text = notes,
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     )
                 }
             }
+
+            ArrowPreference(
+                title = stringResource(R.string.update_download),
+                summary = stringResource(
+                    R.string.update_available_summary,
+                    state.current,
+                    formatSize(state.info.apkSize),
+                ),
+                insideMargin = SettingsItemMargin,
+                bottomAction = noteExcerpt,
+                onClick = { updater.download(state.info) },
+            )
         }
-    }
-}
 
-@Composable
-private fun PrimaryAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        colors = ButtonDefaults.buttonColorsPrimary(),
-    ) {
-        Text(text = label, style = MiuixTheme.textStyles.button)
-    }
-}
+        if (state is UpdateState.Ready) {
+            // Resolved before the click, not inside it: a string resource needs a
+            // composable context, and the snackbar is raised from a lambda.
+            val refusedHint = stringResource(R.string.update_permission_needed)
+            val failedHint = stringResource(R.string.update_install_failed)
+            ArrowPreference(
+                title = stringResource(R.string.update_install),
+                summary = stringResource(R.string.update_ready_summary),
+                insideMargin = SettingsItemMargin,
+                onClick = {
+                    when (updater.install(state.file)) {
+                        InstallResult.Started -> Unit
 
-/** A quieter action, sized to sit beside a filled [Button]. */
-@Composable
-private fun SecondaryAction(label: String, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(
-            color = MiuixTheme.colorScheme.surfaceContainerHigh,
-            contentColor = MiuixTheme.colorScheme.onSurfaceContainerHigh,
-        ),
-    ) {
-        Text(text = label, style = MiuixTheme.textStyles.button)
+                        // Only this case is the user's to fix, and only the system
+                        // settings page can hand over the grant. The message says why
+                        // the screen changed under the finger.
+                        InstallResult.NeedsPermission -> {
+                            showMessage(refusedHint)
+                            updater.openInstallPermissionScreen()
+                        }
+
+                        // Granting a permission the app already holds would lead to
+                        // a settings page with nothing to change.
+                        InstallResult.NoInstaller -> showMessage(failedHint)
+                    }
+                },
+            )
+        }
+
+        // Both states where the user may want to read more than the card can
+        // hold get a way out, and only those states need one.
+        if (state is UpdateState.Available || state is UpdateState.Failed) {
+            ArrowPreference(
+                title = stringResource(R.string.update_release_page),
+                insideMargin = SettingsItemMargin,
+                onClick = {
+                    updater.openReleasePage(
+                        (state as? UpdateState.Available)?.info?.pageUrl ?: RELEASES_PAGE,
+                    )
+                },
+            )
+        }
     }
 }
 
@@ -794,6 +1289,12 @@ private fun ActivatedCard(active: Boolean, version: String, modifier: Modifier =
             color = if (dark) ActivatedContainerDark else ActivatedContainer,
             contentColor = content,
         ),
+        // These cards are read-outs, not buttons: they have nowhere to navigate
+        // to, so they stay non-clickable. Miuix wires the press feedback on
+        // independently of onClick, which gives the MIUI "give" under the finger
+        // without pretending there is an action behind it. Tilt is the variant
+        // the reference page uses on its equivalent cards.
+        pressFeedbackType = PressFeedbackType.Tilt,
     ) {
         // clipToBounds rather than clip(RoundedCornerShape): the card has already
         // drawn its squircle outline, and clipping to a plain rounded rectangle
@@ -844,7 +1345,12 @@ private fun ActivatedCard(active: Boolean, version: String, modifier: Modifier =
 /** One of the two short right-hand cards: a quiet label over a large figure. */
 @Composable
 private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier = modifier.fillMaxHeight()) {
+    Card(
+        modifier = modifier.fillMaxHeight(),
+        // Same read-out-not-a-button treatment as [ActivatedCard]; the two cards
+        // sit side by side, so they must not disagree about how they respond.
+        pressFeedbackType = PressFeedbackType.Tilt,
+    ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(14.dp),
             verticalArrangement = Arrangement.Center,
@@ -904,6 +1410,117 @@ private fun InfoCard(service: XposedService?) {
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(top = 2.dp),
             )
+        }
+    }
+}
+
+/**
+ * The confirmation for restarting System UI.
+ *
+ * <p>[OverlayDialog] rather than a bottom sheet: this is the dialog the colour
+ * picker already uses, so the confirmation reads as part of the module instead
+ * of borrowing a second popup style. Rendering through the Scaffold's popup host
+ * is also why this has to stay inside the Scaffold's content lambda.
+ *
+ * <p>Dismissal is refused while the kill is in flight — the user may already be
+ * looking at a root prompt, and closing the dialog there would leave the outcome
+ * with nowhere to be reported.
+ */
+@Composable
+private fun RestartDialog(
+    controller: RestartController,
+    show: Boolean,
+    onDismiss: () -> Unit,
+) {
+    val state = controller.state
+    val running = state is RestartState.Running
+
+    OverlayDialog(
+        show = show,
+        title = stringResource(R.string.restart_title),
+        summary = stringResource(R.string.restart_summary),
+        onDismissRequest = { if (!running) onDismiss() },
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // The raw shell text rides along with the localised headline, the
+            // same way a failed update pairs its diagnostic detail.
+            if (state is RestartState.Failed) {
+                Text(
+                    text = listOfNotNull(
+                        stringResource(R.string.restart_failed),
+                        state.detail?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · "),
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = MiuixTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                TextButton(
+                    text = stringResource(R.string.cancel),
+                    onClick = onDismiss,
+                    enabled = !running,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = { controller.restart() },
+                    enabled = !running,
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (running) R.string.restart_running else R.string.restart_confirm,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The confirmation for resetting the three role colours.
+ *
+ * <p>Same [OverlayDialog] shell as the restart confirmation, so it stays inside
+ * the Scaffold's content lambda for the same reason.
+ */
+@Composable
+private fun ResetColorsDialog(
+    show: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    OverlayDialog(
+        show = show,
+        title = stringResource(R.string.color_reset),
+        summary = stringResource(R.string.color_reset_dialog_summary),
+        onDismissRequest = onDismiss,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            TextButton(
+                text = stringResource(R.string.cancel),
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColorsPrimary(),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(text = stringResource(R.string.color_reset_confirm))
+            }
         }
     }
 }
@@ -1012,6 +1629,23 @@ private fun IntSlider(
         steps = ((max - min) / step - 1).coerceAtLeast(0),
         insideMargin = SettingsItemMargin,
     )
+}
+
+/**
+ * The reason a gated row is greyed out, or null when it is not gated at all.
+ *
+ * <p>Each gate is a dependency paired with the title of the row that owns it.
+ * The first dependency that is switched off wins, so a row that needs two of
+ * them names the one the user is likeliest to fix first — reading order, top
+ * to bottom. Returning null rather than a generic sentence is what lets the
+ * caller pass the result straight to `TooltipBox(enabled = ...)`: a row that is
+ * live has nothing to explain, and a tooltip that says nothing would still eat
+ * the long-press.
+ */
+@Composable
+private fun gateHint(vararg gates: Pair<Boolean, Int>): String? {
+    val missing = gates.firstOrNull { !it.first } ?: return null
+    return stringResource(R.string.gate_hint, stringResource(missing.second))
 }
 
 private val RoleColor.colorFieldLabelRes: Int
@@ -1125,7 +1759,8 @@ private fun enabledCount(settings: TrioSettings): Int = listOf(
     settings.showMobile,
     settings.showValue,
     settings.showBolt,
-    settings.showMobileType,
+    // The network type is a three-way mode now; anything but "off" counts as on.
+    settings.mobileTypeMode != 0,
 ).count { it }
 
 /**

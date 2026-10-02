@@ -101,7 +101,7 @@ final class TrioRenderer {
         if (w <= 0 || h <= 0 || cfg == null) {
             return;
         }
-        final float scale = Math.min(w / TrioGeometry.INK_W, h / TrioGeometry.INK_H);
+        final float scale = inkScale(w, h);
         if (scale <= 0f) {
             return;
         }
@@ -130,9 +130,12 @@ final class TrioRenderer {
         final boolean boltInGap = bolt && !swap;
         final boolean wifiInCentre = wifi && !swap;
         final boolean wifiInGap = wifi && swap;
-        // The network type only ever claims the centre, and never against the
-        // bolt: a bolt at the ring centre outranks it.
-        final boolean typeInCentre = cfg.showMobileType && hasType && !wifi && !boltInCentre;
+        // The network type claims the ring centre only in the in-ring mode; both
+        // off and out-of-ring leave the centre to the value, because out-of-ring
+        // is drawn by a separate label view outside this canvas. It never
+        // competes with the bolt either: a bolt at the centre outranks it.
+        final boolean typeInCentre = cfg.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING
+                && hasType && !wifi && !boltInCentre;
         final boolean valueInCentre = cfg.showValue && level >= 0
                 && !typeInCentre && !wifiInCentre && !boltInCentre;
         final boolean valueInGap = cfg.showValue && level >= 0
@@ -217,9 +220,15 @@ final class TrioRenderer {
     }
 
     /**
-     * Draws the open battery arc from progress {@code from} to {@code to}
-     * (0..1 of the full path length), skipping the segment hidden behind the
-     * top gap.
+     * Draws the open battery arc from progress {@code from} to {@code to},
+     * skipping the segment hidden behind the top gap.
+     *
+     * <p>Both ends are progress of the arc that is <em>actually drawn</em>, not
+     * of the full path: the two segments the mouth leaves behind divide the
+     * level between them, so 50% ends exactly where the left segment does and
+     * the mouth never consumes any of it. Measuring over the whole path instead
+     * made the level stand still across the entire width of the mouth — the
+     * right half did not start filling until the level had climbed past 67%.
      */
     private static void batteryRing(Canvas c, float from, float to, float gapStart, float gapEnd) {
         from = clamp01(from);
@@ -227,13 +236,26 @@ final class TrioRenderer {
         if (to <= from) {
             return;
         }
-        final float firstEnd = Math.min(to, gapStart);
-        if (firstEnd > from) {
-            arcByProgress(c, from, firstEnd, TrioGeometry.B_CX, TrioGeometry.B_CY, TrioGeometry.B_R);
+        final float mouthStart = clamp01(gapStart);
+        final float mouthEnd = clamp01(gapEnd);
+        // Path length that actually carries ink; the level is spread over it.
+        final float drawn = mouthStart + (1f - mouthEnd);
+        if (drawn <= 0f) {
+            return;
         }
-        final float secondStart = Math.max(from, gapEnd);
-        if (to > secondStart) {
-            arcByProgress(c, secondStart, to, TrioGeometry.B_CX, TrioGeometry.B_CY, TrioGeometry.B_R);
+        final float visibleFrom = from * drawn;
+        final float visibleTo = to * drawn;
+        // First segment: visible progress [0, mouthStart] is path [0, mouthStart].
+        final float firstEnd = Math.min(visibleTo, mouthStart);
+        if (firstEnd > visibleFrom) {
+            arcByProgress(c, visibleFrom, firstEnd, TrioGeometry.B_CX, TrioGeometry.B_CY,
+                    TrioGeometry.B_R);
+        }
+        // Second segment: visible progress (mouthStart, drawn] is path (mouthEnd, 1].
+        final float secondFrom = Math.max(visibleFrom, mouthStart);
+        if (visibleTo > secondFrom) {
+            arcByProgress(c, mouthEnd + secondFrom - mouthStart, mouthEnd + visibleTo - mouthStart,
+                    TrioGeometry.B_CX, TrioGeometry.B_CY, TrioGeometry.B_R);
         }
     }
 
@@ -317,7 +339,7 @@ final class TrioRenderer {
         if (weight == sTextWeight) {
             return;
         }
-        TEXT.setTypeface(Typeface.create(TEXT_BASE, weight, false));
+        TEXT.setTypeface(typefaceFor(weight));
         sTextWeight = weight;
     }
 
@@ -410,6 +432,29 @@ final class TrioRenderer {
 
     static int withAlpha(int color, int alpha) {
         return (color & 0x00FFFFFF) | ((alpha & 0xFF) << 24);
+    }
+
+    /**
+     * Pixels per design unit for a host of this size: the uniform scale that
+     * fits the 120x120 design box into the view, i.e. the same factor
+     * {@link #drawInto} applies to its canvas. Anything drawn outside the
+     * canvas (the out-of-ring network type label) has to convert its design-unit
+     * size with this, or it will not match the glyph next to it.
+     */
+    static float inkScale(int w, int h) {
+        if (w <= 0 || h <= 0) {
+            return 0f;
+        }
+        return Math.min(w / TrioGeometry.INK_W, h / TrioGeometry.INK_H);
+    }
+
+    /**
+     * The shared text face at a numeric weight. The settings app and the hooked
+     * side have to agree on it, and so do the in-canvas glyph and the label view
+     * drawn beside it.
+     */
+    static Typeface typefaceFor(int weight) {
+        return Typeface.create(TEXT_BASE, weight, false);
     }
 
     // ----------------------------------------------------------- path builders

@@ -13,19 +13,22 @@
     <string name="master_summary">总开关。关闭后恢复系统原本的电池与信号图标。</string>
 
     <string name="show_wifi_title">显示 Wi-Fi 弧</string>
-    <string name="show_wifi_summary">在最外层绘制 Wi-Fi 弧线，弧数跟随实际信号强度。</string>
+    <string name="show_wifi_summary">在最外层绘制 Wi-Fi 弧线，弧数跟随实际信号强度；关闭后原生 Wi-Fi 图标回到状态栏原本的位置。</string>
 
     <string name="show_mobile_title">显示移动信号点</string>
-    <string name="show_mobile_summary">在底部绘制四个电平点表示移动网络信号强度。</string>
+    <string name="show_mobile_summary">在底部绘制四个电平点表示移动网络信号强度；关闭后原生移动信号图标回到状态栏原本的位置。</string>
 
     <string name="show_value_title">显示电量数字</string>
-    <string name="show_value_summary">在环内显示电量百分比；充电时改为闪电图标。</string>
+    <string name="show_value_summary">在环内显示电量百分比；充电时改为闪电图标。关闭后充电闪电同样交还原生图标。</string>
 
     <string name="show_bolt_title">充电时显示闪电</string>
-    <string name="show_bolt_summary">关闭后充电时仍显示电量数字。</string>
+    <string name="show_bolt_summary">关闭后不再用环内闪电，改由系统原生的充电闪电显示在电池图标旁。</string>
 
-    <string name="show_mobile_type_title">显示网络类型</string>
-    <string name="show_mobile_type_summary">无 Wi-Fi 时在圆环中间显示 3G/4G/5G 等网络类型，电量数字回到顶部。</string>
+    <string name="show_mobile_type_title">网络类型</string>
+    <string name="show_mobile_type_summary">选择网络类型文字的显示位置：关闭、圆环内，或在状态栏中另外绘制一个。</string>
+    <string name="mobile_type_off">关闭</string>
+    <string name="mobile_type_inside">环内</string>
+    <string name="mobile_type_outside">环外</string>
 
     <string name="swap_wifi_value_title">Wi-Fi 与数字换位</string>
     <string name="swap_wifi_value_summary">电量数字放大到圆环中间，Wi-Fi 弧缩到顶部缺口；充电时由大闪电占据圆心。</string>
@@ -42,6 +45,8 @@
     <string name="color_dialog_summary">分别设置状态栏为深色与浅色背景时使用的颜色。</string>
     <string name="color_reset">恢复默认</string>
     <string name="color_reset_summary">把三种状态颜色恢复为出厂预设。</string>
+    <string name="color_reset_dialog_summary">三种状态颜色都会回到出厂预设，当前的自定义颜色会被覆盖。</string>
+    <string name="color_reset_confirm">恢复</string>
     <string name="color_preview">预览</string>
 
     <string name="low_threshold_title">低电量阈值</string>
@@ -61,6 +66,9 @@
 
     <string name="type_size_title">网络类型字号</string>
     <string name="type_size_summary">圆环中间 3G/4G/5G 等文字的大小。</string>
+
+    <string name="out_type_size_title">环外字号</string>
+    <string name="out_type_size_summary">状态栏中环外 3G/4G/5G 等文字的大小。</string>
 
     <string name="type_weight_title">网络类型字重</string>
     <string name="type_weight_summary">网络类型的笔画粗细，100 最细、900 最粗。</string>
@@ -97,19 +105,30 @@
 
     <string name="update_title">检查更新</string>
     <string name="update_summary_idle">从 GitHub Releases 获取最新版本。</string>
-    <string name="update_check">检查更新</string>
     <string name="update_checking">正在检查…</string>
     <string name="update_uptodate">已是最新版本 %1$s</string>
     <string name="update_available">发现新版本 %1$s</string>
     <string name="update_available_summary">当前版本 %1$s · %2$s</string>
     <string name="update_download">下载更新</string>
     <string name="update_downloading">正在下载 %1$d%%</string>
-    <string name="update_ready">下载完成，点按安装</string>
+    <string name="update_ready">新版本已下载完成。</string>
     <string name="update_ready_summary">系统会弹出安装确认，确认后生效。</string>
     <string name="update_install">安装</string>
     <string name="update_retry">重试</string>
     <string name="update_failed">检查更新失败</string>
     <string name="update_no_release">作者尚未发布任何正式版本</string>
     <string name="update_permission_needed">需要先允许本应用安装应用，已为你打开对应设置。</string>
+    <string name="update_install_failed">系统里找不到能处理安装的应用。</string>
     <string name="update_release_page">打开发布页面</string>
+
+    <string name="restart_title">重启系统界面</string>
+    <string name="restart_summary">重启系统界面会重新加载模块，用于刚安装模块或系统界面状态异常时。此操作需要 root 授权，系统界面会短暂消失并自动恢复，不会影响正在运行的应用。</string>
+    <string name="restart_confirm">重启</string>
+    <string name="restart_running">正在重启…</string>
+    <string name="restart_done">系统界面已重启</string>
+    <string name="restart_failed">重启失败，请确认已授予 root 权限</string>
+    <string name="cancel">取消</string>
+
+    <!-- Tooltip on a row greyed out by another setting; %1$s is that setting's name. -->
+    <string name="gate_hint">需要先打开「%1$s」</string>
 </resources>

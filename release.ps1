@@ -70,7 +70,10 @@ Write-Host "==> HyperDuo $Version (versionCode $code), tag $tag" -ForegroundColo
 # ---- 构建 -------------------------------------------------------------------
 
 # 发布构建不能用 --offline：R8 需要一个未 vendored 的 compose-group-mapping。
-$env:JAVA_HOME        = Join-Path $Tools 'jdk\jdk-17.0.20.1+1'
+# JDK 21 是硬性要求，不是选择：Miuix 的产物是 21 字节码，而 miuix-nav 的入口
+# （rememberNavController / entry）是 inline 函数，Kotlin 不允许把 21 的字节码
+# inline 进 17 的目标；AGP 又要求 Java 与 Kotlin 的目标一致。
+$env:JAVA_HOME        = Join-Path $Tools 'jdk\jdk-21.0.12.1+1'
 $env:GRADLE_USER_HOME = Join-Path $Tools 'gradle-home'
 $env:ANDROID_HOME     = Join-Path $Tools 'sdk'
 

@@ -1,9 +1,16 @@
 package com.hyperduo.trio;
 
+import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Typeface;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
@@ -85,18 +92,72 @@ final class TrioHooks {
     private static volatile XposedModule sModule;
 
     /**
-     * Slots whose native icons are folded into the trio glyph.
+     * Every slot the module knows how to fold, one group per sub-toggle.
      *
      * <p>"mobile" and "wifi" are the classic {@code ModernStatusBarMobileView} /
      * {@code ModernStatusBarWifiView} slots. HyperOS 4 replaced the visible mobile
      * indicator with a Compose one whose slot is "stacked_mobile"
      * ({@code SingleBindableStatusBarComposeIconView}); on a real device it is the
      * only mobile child left visible and the classic ones stay {@code a=0.0 v=8}.
-     * All three are listed so the glyph suppresses whichever the build uses.
+     * Both mobile slots are managed together so whichever the build uses follows
+     * the same sub-toggle.
      */
-    private static final List<String> FOLDED_SLOTS =
+    private static final List<String> MANAGED_SLOTS =
             Collections.unmodifiableList(
                     Arrays.asList("wifi", "mobile", "stacked_mobile"));
+
+    /** The "mobile" slot group, folded and restored as one. */
+    private static final List<String> MOBILE_SLOTS =
+            Collections.unmodifiableList(Arrays.asList("mobile", "stacked_mobile"));
+
+    /** The Wi-Fi slot group; a single element list, kept for symmetry. */
+    private static final List<String> WIFI_SLOTS =
+            Collections.unmodifiableList(Arrays.asList("wifi"));
+
+    /**
+     * The battery style that makes MIUI measure, show and lay out its own
+     * charging bolt. Read by {@code MiuiBatteryMeterView.onMeasure},
+     * {@code updateChargeAndText} and {@code onLayout} - never by
+     * {@code onBatteryStyleChanged}, which is the only method whose style-1 path
+     * also hides {@code mBatteryIconView}, the view the glyph is drawn on.
+     */
+    private static final int BOLT_STYLE = 1;
+
+    /**
+     * Gap between the battery view and the out-of-ring network type label.
+     *
+     * <p>Small on purpose: the label is drawn where MIUI's own {@code mobile_type}
+     * tag used to sit, immediately left of the battery, and the whole status bar
+     * row is only as tall as the icons.
+     */
+    private static final float OUT_LABEL_GAP_DP = 2f;
+
+    /**
+     * The slots to fold for the settings in force right now.
+     *
+     * <p>This is what makes a sub-toggle mean something: while the module is on,
+     * a slot is folded exactly when the glyph draws that element, so switching
+     * one off hands its native icon back instead of leaving it stranded at the
+     * container's left edge. The whole list is empty while the module is off,
+     * which is what {@link #restoreNative} relies on to undo everything.
+     *
+     * <p>The bolt is not here: it is not a status-bar icon slot but a child of
+     * the battery view, handed back through {@link #BOLT_STYLE}.
+     */
+    private static List<String> foldedSlots() {
+        final TrioSettings cfg = TrioConfig.get();
+        if (!cfg.enabled) {
+            return Collections.emptyList();
+        }
+        final List<String> slots = new ArrayList<>(MANAGED_SLOTS.size());
+        if (cfg.showWifi) {
+            slots.addAll(WIFI_SLOTS);
+        }
+        if (cfg.showMobile) {
+            slots.addAll(MOBILE_SLOTS);
+        }
+        return slots;
+    }
 
     /** Hosts currently drawing the trio glyph. */
     private static final List<TrioState> HOSTS =
@@ -112,6 +173,27 @@ final class TrioHooks {
 
     /** {@code MiuiBatteryMeterView.mStoreRealStyle}, resolved once. */
     private static volatile Field sStoreRealStyleField;
+    /** {@code MiuiBatteryMeterView.updateChargeAndText}, resolved once. */
+    private static volatile Method sUpdateChargeAndTextField;
+    /** {@code MiuiBatteryMeterView.onBatteryStyleChanged(int)}, resolved once. */
+    private static volatile Method sStyleChangedField;
+    /** {@code MiuiBatteryMeterView.mBatteryChargingView}, resolved once. */
+    private static volatile Field sChargingViewField;
+    /** {@code MiuiBatteryMeterView.mBatteryPercentContainer}, resolved once. */
+    private static volatile Field sPercentContainerField;
+    /**
+     * {@code MiuiBatteryMeterView.mBatteryStyle}, resolved once.
+     *
+     * <p>Written directly, never through {@code onBatteryStyleChanged}: that is
+     * the only path that hides {@code mBatteryIconView}, and it only does so when
+     * the style really changes, so passing the same value leaves the glyph host
+     * alone. See {@link #BOLT_STYLE}.
+     */
+    private static volatile Field sBatteryStyleField;
+    /** {@code MiuiBatteryMeterView.mBatteryIconView}, resolved once. */
+    private static volatile Field sBatteryIconViewField;
+    /** {@code MiuiBatteryMeterView.mHollowBatteryIconView}, resolved once. */
+    private static volatile Field sHollowBatteryIconViewField;
 
     /**
      * Live {@code MiuiBatteryMeterView} instances, so a settings change can ask
@@ -161,6 +243,17 @@ final class TrioHooks {
     private static final Map<Object, String> DIAG_SIG =
             Collections.synchronizedMap(new WeakHashMap<Object, String>());
 
+    /**
+     * Original {@code left}/{@code right} padding of an icon container, recorded
+     * the first time the out-of-ring label reserves room in it.
+     *
+     * <p>Keyed on the <em>icon</em> container the padding is applied to; each value
+     * is a bare {@code int[]}, so - unlike a {@code WeakHashMap<View, TextView>} -
+     * it cannot reach back and keep its own key alive.
+     */
+    private static final Map<View, int[]> OUT_PAD_SAVED =
+            Collections.synchronizedMap(new WeakHashMap<View, int[]>());
+
     /** Hard cap on total child dumps, so a layout loop cannot flood the log. */
     private static volatile int sDiagDumps;
     /** Hard cap on container headers, including {@code owned} flips. */
@@ -197,23 +290,56 @@ final class TrioHooks {
     /**
      * Reacts to the settings app changing a value.
      *
-     * <p>Runs on the Binder thread the framework delivers the change on, so
+     * <p>Runs on whatever thread delivered the change - the framework's Binder
+     * thread, or the main looper for the settings app's reload broadcast - so
      * everything that touches the view tree is posted to the main looper.
      *
-     * <p>Two things need more than a repaint. The battery style was pinned to 0
-     * while the module was on, and MIUI only applies a style inside
-     * {@code onBatteryStyleChanged}, which is not re-run on its own — so each
-     * meter view is asked to re-apply the style it really wants. And when the
-     * module is switched off the native signal icons have to be folded back in,
-     * which means undoing the ignored slots and the forced {@code GONE}.
+     * <p>A plain repaint is only enough when nothing about the suppression moved.
+     * The transitions that need real work are:
+     *
+     * <p>Turning the module <em>off</em> has to undo the slot suppression and the
+     * forced {@code GONE}, hand each meter back the battery style MIUI really
+     * wants, and re-run {@code updateChargeAndText} - the native charging /
+     * percentage views were hidden by our hook and MIUI only re-shows them from
+     * that method, which it does not call on a settings change.
+     *
+     * <p>Turning it <em>on</em> has to redo the suppression (turning it off
+     * dropped it), re-pin the battery style, re-hide the native charging and
+     * percentage views (turning it off handed them back to MIUI), and collapse
+     * the folded children again - see {@link #refoldContainers}, which applies
+     * that state directly rather than waiting for the layout pass that
+     * {@code invalidate()} would not trigger on its own.
+     *
+     * <p>The same work is needed for the sub-toggles, which is why this does not
+     * branch on the master switch alone: {@code show_wifi} and {@code show_mobile}
+     * decide which slots are suppressed, and {@code show_bolt} / {@code show_value}
+     * decide whether the native charging bolt is ours to suppress. Turning a
+     * sub-toggle off has to hand its native element back - see
+     * {@link #foldedSlots} and {@link #applyMeterText} - and turning it on has to
+     * take it away again.
      */
     private static void applyConfigChange() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            // The framework delivers remote-preference changes on a Binder
+            // thread, and the work below calls requestLayout on live views.
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    applyConfigChange();
+                }
+            });
+            return;
+        }
         final boolean enabled = TrioConfig.get().enabled;
         final TrioSettings cfg = TrioConfig.get();
         final List<TrioState> hosts;
         synchronized (HOSTS) {
             hosts = new ArrayList<TrioState>(HOSTS);
         }
+        // Snapshot the meters before anything can drop them: the switch-off path
+        // both re-applies their style and re-runs their text refresh, and the
+        // weak list must not be emptied out from under the second step.
+        final List<View> meters = liveMeters();
         if (debugLog()) {
             log(LOG_INFO, "config changed, hosts=" + hosts.size()
                     + " enabled=" + enabled
@@ -228,21 +354,89 @@ final class TrioHooks {
             v.post(new Runnable() {
                 @Override
                 public void run() {
-                    if (!enabled) {
-                        restoreNative();
+                    if (enabled) {
+                        foldHostContainer(v);
+                        // Insurance on top of refoldContainers(), which applies
+                        // the folded state directly: a layout pass is what MIUI
+                        // itself uses to re-lay the icon container, and letting it
+                        // happen keeps our result consistent with anything MIUI
+                        // does in the same pass.
+                        v.requestLayout();
                     }
+                    // Either mounts or removes it, so this covers switching the
+                    // network type to Out of ring, away from it, and off. Posted
+                    // rather than called inline because it may add a view, which
+                    // must never happen inside a layout pass - and this runnable
+                    // is already the deferred slot the rest of the re-fold uses.
+                    syncOutTypeLabel(v);
                     v.invalidate();
                 }
             });
         }
-        restyleMeters();
-        if (!enabled) {
+        // The styles are re-applied either way, but for different reasons, and it
+        // has to happen before the meter text below: re-applying the style runs
+        // onBatteryStyleChanged, which is what puts the battery views back the way
+        // MIUI wants them - and the style hook re-forces the native bolt onto the
+        // meter afterwards.
+        restyleMeters(meters);
+        // The slot suppression follows the sub-toggles, not just the master switch,
+        // so this runs on every change while the module is on: turning show_wifi or
+        // show_mobile off has to drop that slot from ignoredSlots and let MIUI lay
+        // the native icon out again.
+        if (enabled) {
+            refoldContainers();
+        } else {
             restoreNative();
+        }
+        // Always, whichever toggles moved: the native charging bolt has to follow
+        // show_bolt / show_value, and the percentage container follows the master
+        // switch.
+        applyMeterText(meters);
+    }
+
+    /**
+     * Re-applies the slot suppression to every container we had claimed, and
+     * both collapses the slots the sub-toggles still want folded and hands the
+     * ones they no longer want back to MIUI.
+     *
+     * <p>{@link #restoreNative} drops both the suppression and the forced
+     * {@code GONE}, but keeps the ownership record, so this is what makes a later
+     * re-enable take effect without waiting for each container to be inflated
+     * again.
+     *
+     * <p>Goes through {@link #syncSlots}, not the layout pass's
+     * {@link #ensureFolded}: this runs once per settings change, never per layout,
+     * so the suppression must be applied even when the slot list cannot be read
+     * back, and {@code syncSlots} is idempotent whenever it can be.
+     *
+     * <p>{@link #settle} runs here as well, immediately after the suppression.
+     * Normally {@code settle} is driven by the icon container's {@code onLayout},
+     * and the re-enable path does request a layout so that it gets there - but
+     * that makes correctness depend on the layout pass actually happening and on
+     * MIUI not skipping it. Calling it directly applies the same state now; the
+     * later layout pass is then a no-op, because
+     * {@link #markCollapsed} has already recorded the children.
+     */
+    private static void refoldContainers() {
+        final List<Object> containers;
+        synchronized (OWNED) {
+            containers = new ArrayList<Object>(OWNED.keySet());
+        }
+        for (int i = 0; i < containers.size(); i++) {
+            foldAndSettle(containers.get(i));
+        }
+        foldAndSettle(sStatusIconContainer);
+    }
+
+    private static void foldAndSettle(Object container) {
+        syncSlots(container);
+        if (container instanceof ViewGroup) {
+            settle((ViewGroup) container);
         }
     }
 
-    /** Asks every known {@code MiuiBatteryMeterView} to re-apply its real style. */
-    private static void restyleMeters() {
+    /** Live meter views, dropping the ones the GC already took. */
+    private static List<View> liveMeters() {
         final List<View> meters = new ArrayList<>();
         synchronized (METERS) {
             for (int i = METERS.size() - 1; i >= 0; i--) {
@@ -254,6 +448,74 @@ final class TrioHooks {
                 }
             }
         }
+        return meters;
+    }
+
+    /**
+     * Brings MIUI's own charging bolt and percentage views in line with the
+     * sub-toggles.
+     *
+     * <p>The charging bolt is the one native element this module draws itself, so
+     * it is the one element with a rule: the stock bolt stays out of the way only
+     * while the glyph actually draws its own, which per {@code TrioRenderer} is
+     * {@code showBolt && showValue} while charging. Turn either toggle off and the
+     * stock bolt belongs to MIUI again.
+     *
+     * <p>Handing it back cannot just mean un-hiding it. {@code updateChargeAndText}
+     * is MIUI's authority on whether the bolt belongs on screen - it hides it when
+     * the battery is not charging - and it re-runs on every battery state change.
+     * So the hand-back is: make the view visible, then let MIUI decide. That way a
+     * battery change cannot leave the bolt in a state this module invented.
+     *
+     * <p>The percentage container has no such rule: MIUI only measures and shows
+     * it at battery style 3, and the module never asks for style 3, so while the
+     * module is on it can only ever be hidden. It is shown again whenever the
+     * native text is wanted, so switching the module off leaves MIUI in charge.
+     */
+    private static void applyMeterText(List<View> meters) {
+        final TrioSettings cfg = TrioConfig.get();
+        final boolean glyphBolt = cfg.enabled && cfg.showBolt && cfg.showValue;
+        for (int i = 0; i < meters.size(); i++) {
+            final View meter = meters.get(i);
+            final boolean nativeBolt = !glyphBolt;
+            meter.post(new Runnable() {
+                @Override
+                public void run() {
+                    final Object charging = Refl.get(sChargingViewField, meter);
+                    if (nativeBolt) {
+                        showIfHidden(charging);
+                    } else {
+                        hide(charging);
+                    }
+                    // The percentage text is ours to hide the whole time the
+                    // module is on, whichever sub-toggles are set.
+                    final Object percent = Refl.get(sPercentContainerField, meter);
+                    if (cfg.enabled) {
+                        hide(percent);
+                    } else {
+                        showIfHidden(percent);
+                    }
+                    // Let MIUI re-derive the bolt from the battery state. It only
+                    // runs the text refresh on its own battery callbacks, and this
+                    // is a settings change, so without the call the hand-back
+                    // would wait for the next charge event.
+                    Refl.invoke(sUpdateChargeAndTextField, meter);
+                }
+            });
+        }
+    }
+
+    private static void showIfHidden(Object view) {
+        if (view instanceof View) {
+            final View v = (View) view;
+            if (v.getVisibility() != View.VISIBLE) {
+                v.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
+    /** Asks every known {@code MiuiBatteryMeterView} to re-apply its real style. */
+    private static void restyleMeters(List<View> meters) {
         for (int i = 0; i < meters.size(); i++) {
             final View meter = meters.get(i);
             meter.post(new Runnable() {
@@ -268,8 +530,7 @@ final class TrioHooks {
     private static void reapplyStyle(View meter) {
         final Object style = Refl.get(sStoreRealStyleField, meter);
         if (style instanceof Number) {
-            Refl.callArgs(meter, "onBatteryStyleChanged",
-                    new Class<?>[]{int.class},
+            Refl.invokeArgs(sStyleChangedField, meter,
                     new Object[]{Integer.valueOf(((Number) style).intValue())});
         }
     }
@@ -278,6 +539,12 @@ final class TrioHooks {
      * Puts the native icons back: drops our slots from {@code ignoredSlots} and
      * clears the forced {@code GONE}, so switching the module off leaves the
      * status bar exactly as MIUI would have drawn it.
+     *
+     * <p>Only the children recorded in {@code COLLAPSED} are made visible again.
+     * Those are the ones this module hid; a child MIUI itself decided to hide -
+     * no SIM, wifi off, airplane mode - was never recorded and is deliberately
+     * left alone, because resurrecting it would show an icon the system state
+     * does not call for.
      */
     private static void restoreNative() {
         List<Object> containers;
@@ -299,7 +566,14 @@ final class TrioHooks {
                 } catch (Throwable t) {
                     continue;
                 }
-                if (child == null || !FOLDED_SLOTS.contains(slotOf(child))) {
+                if (child == null) {
+                    continue;
+                }
+                final String slot = slotOf(child);
+                if (slot == null || !MANAGED_SLOTS.contains(slot)) {
+                    continue;
+                }
+                if (!unmarkCollapsed(child)) {
                     continue;
                 }
                 try {
@@ -311,12 +585,31 @@ final class TrioHooks {
                 }
             }
         }
+        // The out-of-ring label is ours alone, so taking it back out needs no
+        // state check - unlike the native slots above, MIUI has no opinion about
+        // whether it should exist.
+        for (int i = 0; i < containers.size(); i++) {
+            final Object container = containers.get(i);
+            if (container instanceof View) {
+                removeOutTypeLabel(batteryContainerOf((View) container));
+            }
+        }
+        for (int i = 0; i < containers.size(); i++) {
+            final Object container = containers.get(i);
+            if (container instanceof View) {
+                // While folded, the children were laid out at 0x0 and hidden, so
+                // the container may still hold the measurement taken then.
+                // Making them visible again is not enough on its own: MIUI needs
+                // one more pass before they reappear where they belong.
+                ((View) container).requestLayout();
+            }
+        }
         synchronized (COLLAPSED) {
             COLLAPSED.clear();
         }
-        synchronized (METERS) {
-            METERS.clear();
-        }
+        // METERS is deliberately kept: it holds only weak references (pruned by
+        // liveMeters), and dropping it here would leave a later re-enable with no
+        // meter to re-pin the battery style on.
     }
 
     /**
@@ -391,7 +684,13 @@ final class TrioHooks {
                         final Object icons = Refl.get(iconsField, self);
                         if (icons instanceof View) {
                             sStatusIconContainer = icons;
-                            foldSlots(icons);
+                            syncSlots(icons);
+                        }
+                        if (self instanceof View) {
+                            // The only hook callback that runs early enough on a
+                            // real SystemUI context. TrioConfig ignores repeat
+                            // calls, so this stays a one-shot.
+                            TrioConfig.installReceiver(((View) self).getContext());
                         }
                         return result;
                     }
@@ -412,6 +711,12 @@ final class TrioHooks {
                         final Object result = chain.proceed();
                         final Object self = chain.getThisObject();
                         final Object canvasArg = chain.getArg(0);
+                        if (self instanceof View) {
+                            // Idempotent, and the only chance to pick up a real
+                            // SystemUI context when this generation was loaded
+                            // after the view tree had already been inflated.
+                            TrioConfig.installReceiver(((View) self).getContext());
+                        }
                         if (self instanceof View && canvasArg instanceof Canvas
                                 && TrioConfig.get().enabled) {
                             final View host = (View) self;
@@ -449,11 +754,30 @@ final class TrioHooks {
         }
         // Pin the style to 0: MIUI then shows the digital battery view and hides
         // its hollow variant, and never measures its own charging icon or
-        // percentage container. While the module is off the call is passed
-        // through untouched, so MIUI keeps whatever the user configured.
+        // percentage container. While the module is off the request is passed
+        // through untouched, so MIUI is fully in charge again; while it is on the
+        // style is always 0 and the native bolt is handed back on the side - see
+        // the hook below.
         final Field storeRealStyle = Refl.field(meter, "mStoreRealStyle");
         sStoreRealStyleField = storeRealStyle;
-        final int a = hook(module, Refl.method(meter, "onBatteryStyleChanged", int.class),
+        // Resolved through getDeclaredMethod rather than looked up by name on
+        // every call: Refl.callByName uses getMethod, which cannot see a
+        // non-public member, and the visibility of MIUI's private fields and
+        // methods is not part of any contract we can rely on.
+        final Method updateChargeAndText = Refl.method(meter, "updateChargeAndText");
+        sUpdateChargeAndTextField = updateChargeAndText;
+        sChargingViewField = Refl.field(meter, "mBatteryChargingView");
+        sPercentContainerField = Refl.field(meter, "mBatteryPercentContainer");
+        // Needed to hand MIUI its own charging bolt back: mBatteryStyle is the
+        // switch its onMeasure, onLayout and updateChargeAndText all read, and
+        // the two battery views have to be left the way a style-1 meter would
+        // look, which is the opposite of the swap onBatteryStyleChanged performs.
+        sBatteryStyleField = Refl.field(meter, "mBatteryStyle");
+        sBatteryIconViewField = Refl.field(meter, "mBatteryIconView");
+        sHollowBatteryIconViewField = Refl.field(meter, "mHollowBatteryIconView");
+        final Method styleChanged = Refl.method(meter, "onBatteryStyleChanged", int.class);
+        sStyleChangedField = styleChanged;
+        final int a = hook(module, styleChanged,
                 "hyperduo-style", new XposedInterface.Hooker() {
                     @Override
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
@@ -462,21 +786,49 @@ final class TrioHooks {
                         if (self instanceof View) {
                             rememberMeter((View) self);
                         }
-                        if (!TrioConfig.get().enabled) {
+                        final TrioSettings cfg = TrioConfig.get();
+                        // The stock bolt is ours to suppress exactly while the
+                        // glyph draws its own, which per TrioRenderer is
+                        // showBolt && showValue.
+                        final boolean glyphBolt = cfg.enabled && cfg.showBolt && cfg.showValue;
+                        if (!cfg.enabled) {
+                            // Nothing of ours is involved: pass the real style
+                            // through and leave MIUI's own bolt alone.
+                            //
+                            // The field is cleared first, though. While the module
+                            // was on and the glyph was drawing no bolt of its own,
+                            // handBackBolt wrote BOLT_STYLE into mBatteryStyle -
+                            // but onBatteryStyleChanged leaves the two battery
+                            // views the way *it* wants them, which for BOLT_STYLE
+                            // is the hollow outline on and the normal icon off.
+                            // MIUI guards that work on "the style really changed"
+                            // and would therefore skip it, leaving the normal icon
+                            // in place of the hollow one. The constructor's own
+                            // value is the one state that makes the guard pass.
+                            Refl.set(sBatteryStyleField, self, Integer.valueOf(-1));
                             return chain.proceed();
                         }
+                        // Always ask for 0, even when MIUI's bolt is wanted. The
+                        // style-1 branch of onBatteryStyleChanged hides
+                        // mBatteryIconView - the view the glyph is drawn on - so
+                        // MIUI must never be allowed to take that branch while the
+                        // module is on. The bolt is handed back by writing the
+                        // field below, which no other code path reads.
                         final Object result = chain.proceed(new Object[]{Integer.valueOf(0)});
                         // L574 assigns mStoreRealStyle = i *before* the style guard,
-                        // so our forced 0 clobbers the real style. Keyguard reads it
+                        // so a forced style clobbers the real one. Keyguard reads it
                         // (KeyguardStatusBarViewControllerInject: "mStoreRealStyle != 3")
                         // to choose between its icon-container and battery alpha
                         // animations, so restore the caller's value.
                         Refl.set(storeRealStyle, self, requested);
+                        if (!glyphBolt) {
+                            handBackBolt(self);
+                        }
                         return result;
                     }
                 });
         // updateChargeAndText() re-shows those two views on every state change.
-        final int b = hook(module, Refl.method(meter, "updateChargeAndText"),
+        final int b = hook(module, updateChargeAndText,
                 "hyperduo-charge-text", new XposedInterface.Hooker() {
                     @Override
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
@@ -485,14 +837,50 @@ final class TrioHooks {
                         if (self instanceof View) {
                             rememberMeter((View) self);
                         }
-                        if (TrioConfig.get().enabled) {
-                            hide(Refl.get(Refl.field(meter, "mBatteryChargingView"), self));
-                            hide(Refl.get(Refl.field(meter, "mBatteryPercentContainer"), self));
+                        final TrioSettings cfg = TrioConfig.get();
+                        if (cfg.enabled && cfg.showBolt && cfg.showValue) {
+                            // The glyph draws the bolt, so MIUI's own copy of it
+                            // must not show up next to the ring.
+                            hide(Refl.get(sChargingViewField, self));
+                        }
+                        // Otherwise MIUI's own decision stands: handBackBolt and
+                        // the module's own hand-back leave the visibility to this
+                        // method, and re-hiding here would undo them.
+                        if (cfg.enabled) {
+                            // The percentage container is only measured and shown
+                            // at battery style 3, which the module never asks for,
+                            // so it is ours to hide for as long as we are on.
+                            hide(Refl.get(sPercentContainerField, self));
                         }
                         return result;
                     }
                 });
         return a + b;
+    }
+
+    /**
+     * Gives MIUI's own charging bolt back to the meter it belongs to.
+     *
+     * <p>Written as a field assignment instead of a
+     * {@code onBatteryStyleChanged(BOLT_STYLE)} call on purpose: that method's
+     * style-1 branch hides {@code mBatteryIconView}, which is exactly the view
+     * the trio glyph is drawn on, so going through it would trade the native bolt
+     * for the glyph. Nothing else in the firmware assigns {@code mBatteryStyle}
+     * - only the constructor and that method - so the value survives, and the
+     * three readers that matter all act on it: {@code onMeasure} measures the
+     * bolt, {@code onLayout} puts it right after the battery, and
+     * {@code updateChargeAndText} shows it when the battery is charging.
+     *
+     * <p>The two battery views are restored to their style-1 look first, to undo
+     * MIUI's own swap: the glyph host stays visible and the hollow outline stays
+     * gone. Then MIUI is asked to redo its charge text, so the bolt's visibility
+     * comes from the battery state rather than from us.
+     */
+    private static void handBackBolt(Object meter) {
+        Refl.set(sBatteryStyleField, meter, Integer.valueOf(BOLT_STYLE));
+        showIfHidden(Refl.get(sBatteryIconViewField, meter));
+        hide(Refl.get(sHollowBatteryIconViewField, meter));
+        Refl.invoke(sUpdateChargeAndTextField, meter);
     }
 
     /** Records a meter view so a later settings change can re-apply its style. */
@@ -524,7 +912,7 @@ final class TrioHooks {
                     @Override
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
                         final Object result = chain.proceed();
-                        foldSlots(sStatusIconContainer);
+                        syncSlots(sStatusIconContainer);
                         return result;
                     }
                 });
@@ -653,8 +1041,10 @@ final class TrioHooks {
 
     /**
      * Brings one icon container into its steady state: our slots suppressed, the
-     * folded native children collapsed out of the layout. Runs inside
-     * {@code onLayout}, after the container has finished positioning children.
+     * folded native children collapsed out of the layout, and - just as
+     * important - the children whose sub-toggle went off handed back to MIUI.
+     * Runs inside {@code onLayout}, after the container has finished positioning
+     * children.
      */
     private static void settle(ViewGroup container) {
         if (!TrioConfig.get().enabled) {
@@ -667,7 +1057,12 @@ final class TrioHooks {
         if (!owned) {
             return;
         }
+        // Refresh-only: this runs inside onLayout, so it may reposition the
+        // label but must never add or remove one.
+        refreshOutTypeLabel(container);
+        final List<String> wanted = foldedSlots();
         final int count = container.getChildCount();
+        boolean relayout = false;
         for (int i = 0; i < count; i++) {
             final View child;
             try {
@@ -675,7 +1070,30 @@ final class TrioHooks {
             } catch (Throwable t) {
                 continue;
             }
-            if (child == null || !FOLDED_SLOTS.contains(slotOf(child))) {
+            if (child == null) {
+                continue;
+            }
+            final String slot = slotOf(child);
+            if (slot == null || !MANAGED_SLOTS.contains(slot)) {
+                continue;
+            }
+            if (!wanted.contains(slot)) {
+                // The sub-toggle for this slot is off, so the native icon belongs
+                // to MIUI again. Undo only what we did: a child MIUI itself hid
+                // stays hidden, and the zero-size layout below heals on its own,
+                // because MIUI lays out every slot that is not ignored.
+                if (unmarkCollapsed(child)) {
+                    try {
+                        if (child.getVisibility() != View.VISIBLE) {
+                            child.setVisibility(View.VISIBLE);
+                        }
+                    } catch (Throwable ignored) {
+                        // never let one child abort the pass
+                    }
+                    // The slot was ignored a moment ago, so the container still
+                    // holds the measurement taken with this child collapsed.
+                    relayout = true;
+                }
                 continue;
             }
             // Collapse the child out of the layout. MIUI's own onLayout lays every
@@ -703,6 +1121,9 @@ final class TrioHooks {
                 }
             }
         }
+        if (relayout) {
+            container.requestLayout();
+        }
     }
 
     /**
@@ -714,6 +1135,18 @@ final class TrioHooks {
     private static boolean markCollapsed(View child) {
         synchronized (COLLAPSED) {
             return COLLAPSED.put(child, Boolean.TRUE) == null;
+        }
+    }
+
+    /**
+     * Forgets that {@code child} was hidden by us, returning true only for the
+     * call that did so - the same once-only guard as {@link #markCollapsed}, for
+     * the opposite direction. Without it, re-showing a child on every pass would
+     * schedule a new layout each time MIUI hid it again.
+     */
+    private static boolean unmarkCollapsed(View child) {
+        synchronized (COLLAPSED) {
+            return COLLAPSED.remove(child) != null;
         }
     }
 
@@ -801,11 +1234,17 @@ final class TrioHooks {
     }
 
     /**
-     * Makes sure both folded slots are registered in {@code ignoredSlots}.
+     * Makes sure the container's ignored slots match the sub-toggles, as seen
+     * from the layout pass.
      *
-     * <p>Called only when something is actually missing: {@code addIgnoredSlots}
-     * ends in an unconditional {@code requestLayout()}, so calling it on every
-     * layout pass would schedule a new layout forever.
+     * <p>Returns without doing anything once they agree, which is what keeps this
+     * from looping: {@code addIgnoredSlots} ends in an unconditional
+     * {@code requestLayout()}, and re-appending on every pass would schedule a
+     * new layout forever. When the slot list cannot be read there is nothing to
+     * compare against, and assuming "already in sync" is the only choice that
+     * cannot loop. Callers that must apply the state regardless - a fresh
+     * container, or a settings change - use {@link #syncSlots}, which appends
+     * even when it cannot verify.
      */
     private static void ensureFolded(Object container) {
         final Field f = sIgnoredSlotsField;
@@ -817,15 +1256,19 @@ final class TrioHooks {
             return;
         }
         final List<?> slots = (List<?>) value;
-        boolean missing = false;
-        for (int i = 0; i < FOLDED_SLOTS.size(); i++) {
-            if (!slots.contains(FOLDED_SLOTS.get(i))) {
-                missing = true;
-                break;
+        final List<String> wanted = foldedSlots();
+        for (int i = 0; i < wanted.size(); i++) {
+            if (!slots.contains(wanted.get(i))) {
+                syncSlots(container);
+                return;
             }
         }
-        if (missing) {
-            foldSlots(container);
+        for (int i = 0; i < MANAGED_SLOTS.size(); i++) {
+            final String slot = MANAGED_SLOTS.get(i);
+            if (!wanted.contains(slot) && slots.contains(slot)) {
+                syncSlots(container);
+                return;
+            }
         }
     }
 
@@ -1069,6 +1512,7 @@ final class TrioHooks {
                 @Override
                 public void run() {
                     foldHostContainer(host);
+                    syncOutTypeLabel(host);
                 }
             });
             return s;
@@ -1111,6 +1555,10 @@ final class TrioHooks {
             v.post(new Runnable() {
                 @Override
                 public void run() {
+                    // The type string is sampled from a drawable's measure(), so
+                    // this is the only path that can carry a changed "5G"/"5GA"
+                    // through to a label the glyph canvas does not own.
+                    syncOutTypeLabel(v);
                     v.invalidate();
                 }
             });
@@ -1119,17 +1567,82 @@ final class TrioHooks {
 
     // ------------------------------------------------------------------ helpers
 
-    /** Appends the folded slots to a container's ignored-slot list. */
-    private static void foldSlots(Object container) {
-        if (container == null || !TrioConfig.get().enabled) {
+    /**
+     * Makes {@code container}'s ignored-slot list match the sub-toggles: the
+     * slots the glyph draws are added, the ones it no longer draws are removed.
+     *
+     * <p>Both directions matter. Adding folds a native icon into the glyph;
+     * <em>removing</em> is what hands it back, because MIUI lays out - and so
+     * positions - every slot that is not ignored. Only slots this class manages
+     * are ever removed: {@code ignoredSlots} also carries MIUI's own entries
+     * (the control-centre {@code RIGHT_BLOCK_LIST}), and dropping one of those
+     * would move icons the user never asked about.
+     *
+     * <p>The layout request is deliberately conditional. {@code addIgnoredSlots}
+     * ends in an unconditional {@code requestLayout()}, so appending on every
+     * pass would schedule a new layout forever - which is why this is idempotent
+     * while {@code ignoredSlots} is readable, and why it does not add a second
+     * request of its own when it appended. When the field cannot be read there is
+     * nothing to compare against, so the append happens blind: a MIUI rename must
+     * not silently stop the module from folding. Removal is impossible then, and
+     * the sub-toggle degrades to the old always-folded behaviour.
+     */
+    private static void syncSlots(Object container) {
+        if (container == null) {
             return;
         }
-        Refl.callArgs(container, "addIgnoredSlots",
-                new Class<?>[]{List.class},
-                new Object[]{new ArrayList<String>(FOLDED_SLOTS)});
+        final List<String> wanted = foldedSlots();
+        final Field f = sIgnoredSlotsField;
+        final Object value = (f == null) ? null : Refl.get(f, container);
+        if (!(value instanceof List)) {
+            if (!wanted.isEmpty()) {
+                addSlots(container, wanted);
+            }
+            return;
+        }
+        final List<?> slots = (List<?>) value;
+        boolean missing = false;
+        for (int i = 0; i < wanted.size(); i++) {
+            if (!slots.contains(wanted.get(i))) {
+                missing = true;
+                break;
+            }
+        }
+        boolean removed = false;
+        try {
+            for (int i = 0; i < MANAGED_SLOTS.size(); i++) {
+                final String slot = MANAGED_SLOTS.get(i);
+                if (!wanted.contains(slot) && slots.remove(slot)) {
+                    removed = true;
+                }
+            }
+        } catch (Throwable ignored) {
+            // an immutable list is MIUI's problem, not ours
+        }
+        if (missing) {
+            addSlots(container, wanted);
+        } else if (removed) {
+            // Nothing else will ask for a pass, and MIUI has to re-measure and
+            // re-lay the slot before the handed-back icon reappears in place.
+            requestLayout(container);
+        }
     }
 
-    /** Removes the folded slots again, so MIUI measures and lays them out. */
+    /** Appends {@code slots} to the container's ignored list. */
+    private static void addSlots(Object container, List<String> slots) {
+        Refl.callArgs(container, "addIgnoredSlots",
+                new Class<?>[]{List.class},
+                new Object[]{new ArrayList<String>(slots)});
+    }
+
+    private static void requestLayout(Object container) {
+        Refl.callArgs(container, "requestLayout", new Class<?>[0], new Object[0]);
+    }
+
+    /**
+     * Removes every managed slot again, so MIUI measures and lays them all out.
+     * Used when the module is switched off wholesale.
+     */
     private static void unfoldSlots(Object container) {
         if (container == null) {
             return;
@@ -1143,11 +1656,11 @@ final class TrioHooks {
             return;
         }
         try {
-            ((List<?>) value).removeAll(FOLDED_SLOTS);
+            ((List<?>) value).removeAll(MANAGED_SLOTS);
         } catch (Throwable ignored) {
             // an immutable list is MIUI's problem, not ours
         }
-        Refl.callArgs(container, "requestLayout", new Class<?>[0], new Object[0]);
+        requestLayout(container);
     }
 
     /**
@@ -1164,7 +1677,455 @@ final class TrioHooks {
         if (container == null) {
             return;
         }
-        foldSlots(Refl.get(sStatusIconField, container));
+        syncSlots(Refl.get(sStatusIconField, container));
+    }
+
+    // ------------------------------------------------- out-of-ring type label
+
+    /**
+     * The out-of-ring network type label.
+     *
+     * <p>A {@link TextView} of our own rather than MIUI's {@code mobile_type}
+     * view. That one is a child of the mobile slot group, so folding the mobile
+     * icon takes it away with it - and the whole point of this mode is to keep
+     * showing the type while the glyph carries the signal. Being our own class
+     * also gives {@link #findOutTypeLabel} a marker no MIUI view can match by
+     * accident, which a tag or a {@code WeakHashMap} keyed on the container
+     * would not: {@code mParent} is a strong reference from the label back to
+     * the container, so such a map's values would keep their own keys alive.
+     */
+    private static final class OutTypeLabel extends TextView {
+        /** The glyph host supplying the ink scale and the icon colour. */
+        View host;
+
+        OutTypeLabel(Context context) {
+            super(context);
+        }
+    }
+
+    /**
+     * Mounts, updates or removes the out-of-ring label for one glyph host.
+     *
+     * <p>Called only from posted runnables: it may {@code addView}, which must
+     * never happen inside a layout pass. The mode check comes first so that the
+     * ordinary path - in-ring or off - pays for one child scan and nothing else.
+     */
+    private static void syncOutTypeLabel(View host) {
+        if (host == null) {
+            return;
+        }
+        final Object owner = batteryContainerOf(host);
+        if (!(owner instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup container = (ViewGroup) owner;
+        final TrioSettings cfg = TrioConfig.get();
+        final boolean wanted = cfg.enabled
+                && cfg.mobileTypeMode == Prefs.MOBILE_TYPE_OUT_RING;
+        OutTypeLabel label = findOutTypeLabel(container);
+        if (!wanted) {
+            removeOutTypeLabel(container);
+            return;
+        }
+        final View anchor = meterIn(host, container);
+        if (anchor == null) {
+            removeOutTypeLabel(container);
+            return;
+        }
+        // Only a guard: inkScale() is 0 exactly when the host has not been
+        // measured yet, and an unmeasured meter has no frame to place against.
+        // The next posted sync mounts the label.
+        if (TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
+            removeOutTypeLabel(container);
+            return;
+        }
+        if (label == null) {
+            label = createOutTypeLabel(container);
+        }
+        label.host = host;
+        updateOutTypeLabel(container, label, host, anchor);
+    }
+
+    /**
+     * Repositions an already-mounted label. Runs inside
+     * {@code MiuiStatusIconContainer.onLayout}, so it may relayout the label but
+     * must never add or remove a view.
+     *
+     * <p>The label lives in the {@code MiuiStatusBatteryContainer}, which is the
+     * icon container's <em>parent</em>, so this starts by walking up - and the
+     * label was placed relative to the battery meter, whose position the same
+     * traversal may only just have settled. A wrong frame here is therefore
+     * normal on the first pass and heals on the next one.
+     */
+    private static void refreshOutTypeLabel(ViewGroup iconContainer) {
+        final Object owner = batteryContainerOf(iconContainer);
+        if (!(owner instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup container = (ViewGroup) owner;
+        final OutTypeLabel label = findOutTypeLabel(container);
+        if (label == null) {
+            // Mounting needs a host for the ink scale and must not run in a
+            // layout pass, so ask for a posted sync instead - but only once the
+            // host can actually be measured, or every pass would queue another.
+            requestOutTypeSync(container);
+            return;
+        }
+        final View host = label.host;
+        if (host == null || container.getWidth() <= 0 || container.getHeight() <= 0) {
+            return;
+        }
+        final View anchor = meterIn(host, container);
+        if (anchor == null) {
+            return;
+        }
+        // Only a guard: inkScale() is 0 exactly when the host has no measured
+        // size, and the label cannot be positioned against an unmeasured meter.
+        // The text size no longer comes from the ink scale - it is MIUI's own
+        // status-bar size, which is already in screen pixels.
+        if (TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
+            return;
+        }
+        // Text and size both re-measure the view, and a re-measure schedules a
+        // layout - which is exactly what must not happen inside onLayout. Hand
+        // those over to the posted path and only ever reposition from here.
+        final String text = typeText();
+        if (text.length() == 0) {
+            // The mode change and every type update already arrive through a
+            // posted sync, so the label is parked at GONE before this can see an
+            // empty type. Nothing to do, and nothing to lay out.
+            return;
+        }
+        if (label.getVisibility() != View.VISIBLE
+                || !text.contentEquals(label.getText())
+                || label.getTextSize() != TrioConfig.get().outTypeSize) {
+            requestOutTypeSync(container);
+            return;
+        }
+        // The strip belongs to the icon container and is taken with setPadding,
+        // which schedules a layout - illegal from in here. A container rebuilt by
+        // MIUI comes back with its own padding and an empty book, so hand that
+        // over to the posted path too.
+        final View icons = iconContainerIn(container);
+        if (icons != null && !OUT_PAD_SAVED.containsKey(icons)) {
+            requestOutTypeSync(container);
+            return;
+        }
+        final TrioState state = stateFor(host);
+        if (state != null) {
+            final int colour = state.foreground();
+            if (label.getCurrentTextColor() != colour) {
+                label.setTextColor(colour);
+            }
+        }
+        placeOutTypeLabel(container, label, anchor);
+    }
+
+    /**
+     * Queues one {@link #syncOutTypeLabel} for the host under {@code container},
+     * without ever queuing an empty one: the runnable is a no-op unless the mode
+     * is Out of ring, a host is registered and that host has been measured.
+     */
+    private static void requestOutTypeSync(final ViewGroup container) {
+        if (TrioConfig.get().mobileTypeMode != Prefs.MOBILE_TYPE_OUT_RING) {
+            return;
+        }
+        final View host = hostIn(container);
+        if (host == null
+                || TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
+            return;
+        }
+        final View target = host;
+        container.post(new Runnable() {
+            @Override
+            public void run() {
+                syncOutTypeLabel(target);
+            }
+        });
+    }
+
+    /** The type string to show, normalised to empty when there is none. */
+    private static String typeText() {
+        final String text = TrioState.sMobileType;
+        return text == null ? "" : text;
+    }
+
+    /** The label already mounted on {@code container}, or null. */
+    private static OutTypeLabel findOutTypeLabel(ViewGroup container) {
+        final int count = container.getChildCount();
+        for (int i = 0; i < count; i++) {
+            final View child;
+            try {
+                child = container.getChildAt(i);
+            } catch (Throwable t) {
+                continue;
+            }
+            if (child instanceof OutTypeLabel) {
+                return (OutTypeLabel) child;
+            }
+        }
+        return null;
+    }
+
+    private static OutTypeLabel createOutTypeLabel(ViewGroup container) {
+        final OutTypeLabel label = new OutTypeLabel(container.getContext());
+        label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+        label.setIncludeFontPadding(false);
+        label.setLetterSpacing(TrioGeometry.VALUE_LETTER_SPACING);
+        label.setVisibility(View.GONE);
+        // WRAP_CONTENT on both axes: the size is set explicitly further down by
+        // measuring against an unlimited spec. The container never measures this
+        // child on its own - MiuiStatusBatteryContainer.onMeasure only touches
+        // its three named fields - so whatever we measure stands.
+        container.addView(label, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        return label;
+    }
+
+    private static void removeOutTypeLabel(View container) {
+        if (!(container instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup group = (ViewGroup) container;
+        // Hand the strip back before the early return below: a label that was
+        // never mounted can still have left the padding behind if a previous
+        // mount was torn down through a different path.
+        releaseOutTypeSpace(group);
+        final OutTypeLabel label = findOutTypeLabel(group);
+        if (label == null) {
+            return;
+        }
+        try {
+            group.removeView(label);
+        } catch (Throwable ignored) {
+            // a container torn down under us is not worth crashing over
+        }
+    }
+
+    private static void updateOutTypeLabel(ViewGroup container, OutTypeLabel label,
+                                           View host, View anchor) {
+        final TrioSettings cfg = TrioConfig.get();
+        final TrioState state = stateFor(host);
+        if (state != null) {
+            // Pull the status values in before reading them: this runs from a
+            // posted runnable, but the state snapshot is only as fresh as the
+            // last call to refresh().
+            state.refresh();
+        }
+        final String text = typeText();
+        if (text.length() == 0) {
+            // Hidden rather than removed: the text comes and goes as the modem
+            // reports a type, and add/remove on every layout pass would churn
+            // the container for nothing. The reserved strip goes back, though -
+            // holding it open with nothing in it would just leave a hole in the
+            // status bar.
+            releaseOutTypeSpace(container);
+            if (label.getVisibility() != View.GONE) {
+                label.setVisibility(View.GONE);
+            }
+            return;
+        }
+        if (!text.contentEquals(label.getText())) {
+            label.setText(text);
+        }
+        // Its own setting, not the in-ring type_size: that one is authored for
+        // the ring canvas' 120x120 design space and comes out far too small
+        // once the label stands in the status bar's real pixel space.
+        final float size = cfg.outTypeSize;
+        if (label.getTextSize() != size) {
+            // PX, not the SP that the one-argument overload would use: the
+            // status bar lays out in raw pixels, so the value is applied as-is
+            // rather than scaled by the user's font-size setting.
+            label.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
+        }
+        final Typeface typeface = TrioRenderer.typefaceFor(cfg.typeWeight);
+        if (label.getTypeface() != typeface) {
+            label.setTypeface(typeface);
+        }
+        final int colour = (state != null) ? state.foreground() : 0xFFFFFFFF;
+        if (label.getCurrentTextColor() != colour) {
+            label.setTextColor(colour);
+        }
+        if (label.getVisibility() != View.VISIBLE) {
+            label.setVisibility(View.VISIBLE);
+        }
+        label.measure(View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        // Measured first, because the strip the native row has to give up is the
+        // label's own width plus the gap on either side of it. Without it the row
+        // lays its icons all the way to the end and paints over the label.
+        reserveOutTypeSpace(container, label.getMeasuredWidth() + 2 * outLabelGap(container));
+        placeOutTypeLabel(container, label, anchor);
+        if (debugLog()) {
+            log(LOG_INFO, "out type: \"" + text + "\" size=" + size
+                    + " label=" + label.getWidth() + "x" + label.getHeight()
+                    + " at " + label.getLeft() + "," + label.getTop()
+                    + " anchor=" + anchor.getLeft() + ".." + anchor.getRight()
+                    + " container=" + container.getWidth() + "x" + container.getHeight());
+        }
+    }
+
+    /**
+     * Puts the label just outside the battery meter, on the side the container
+     * reads away from: left of it in LTR, right of it in RTL. This is the gap
+     * MIUI's own {@code mobile_type} label used to fill.
+     */
+    private static void placeOutTypeLabel(ViewGroup container, View label, View anchor) {
+        final int width = label.getMeasuredWidth();
+        final int height = label.getMeasuredHeight();
+        if (width <= 0 || height <= 0 || anchor.getWidth() <= 0) {
+            return;
+        }
+        final int gap = outLabelGap(container);
+        // getLayoutDirection() rather than isLayoutRtl(): the latter is
+        // protected in View, and the result is identical.
+        final boolean rtl =
+                container.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        int left = rtl ? anchor.getRight() + gap : anchor.getLeft() - gap - width;
+        int top = anchor.getTop() + (anchor.getHeight() - height) / 2;
+        // Stay inside the container even when the meter sits flush against an
+        // edge. The container itself carries no padding here - the include in
+        // status_bar.xml puts status_bar_padding_start on the parent - so this
+        // normally clamps to 0 and only bites in the RTL case.
+        final int minLeft = container.getPaddingLeft();
+        final int maxLeft = container.getWidth() - container.getPaddingRight() - width;
+        if (maxLeft >= minLeft) {
+            if (left > maxLeft) {
+                left = maxLeft;
+            }
+            if (left < minLeft) {
+                left = minLeft;
+            }
+        }
+        final int minTop = container.getPaddingTop();
+        final int maxTop = container.getHeight() - container.getPaddingBottom() - height;
+        if (maxTop >= minTop) {
+            if (top > maxTop) {
+                top = maxTop;
+            }
+            if (top < minTop) {
+                top = minTop;
+            }
+        }
+        label.layout(left, top, left + width, top + height);
+    }
+
+    /** The gap the label keeps from the icons and from the battery meter. */
+    private static int outLabelGap(View container) {
+        final float density = container.getResources().getDisplayMetrics().density;
+        return Math.round(OUT_LABEL_GAP_DP * density);
+    }
+
+    /**
+     * The {@code MiuiStatusIconContainer} nested in a battery container, i.e. the
+     * view whose end padding decides where the native icon row starts.
+     */
+    private static View iconContainerIn(View batteryContainer) {
+        final Object icons = Refl.get(sStatusIconField, batteryContainer);
+        return (icons instanceof View) ? (View) icons : null;
+    }
+
+    /**
+     * Makes the native icon row give up {@code reserve} pixels at its end, so the
+     * out-of-ring label has room to stand in rather than being painted over.
+     *
+     * <p>{@code MiuiStatusIconContainer.onLayout} walks its children right to left
+     * starting from {@code getWidth() - getPaddingEnd()} and positions each one by
+     * {@code translationX}. Growing that end padding is therefore enough to slide
+     * the whole row inward - no view has to be added to the container, which is
+     * just as well because every one of its children is cast to
+     * {@code StatusIconDisplayable} and a foreign view would crash the pass.
+     *
+     * <p>The original values are remembered against the icon container, so
+     * repeated calls cannot accumulate: {@code setPadding} is always called with
+     * the original plus the current reserve, never with the current value plus
+     * the reserve.
+     *
+     * <p>Callers must be on a posted path - {@code setPadding} schedules a layout,
+     * which is illegal inside one.
+     */
+    private static void reserveOutTypeSpace(ViewGroup batteryContainer, int reserve) {
+        if (reserve <= 0) {
+            return;
+        }
+        final View icons = iconContainerIn(batteryContainer);
+        if (icons == null) {
+            return;
+        }
+        int[] saved = OUT_PAD_SAVED.get(icons);
+        if (saved == null) {
+            saved = new int[] {icons.getPaddingLeft(), icons.getPaddingRight()};
+            OUT_PAD_SAVED.put(icons, saved);
+        }
+        // getPaddingEnd() resolves to the right in LTR and to the left in RTL, and
+        // that is the side the icon row is laid out from - so that is the side the
+        // room has to come out of.
+        final boolean rtl = icons.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        final int left = saved[0] + (rtl ? reserve : 0);
+        final int right = saved[1] + (rtl ? 0 : reserve);
+        if (icons.getPaddingLeft() == left && icons.getPaddingRight() == right) {
+            return;
+        }
+        icons.setPadding(left, icons.getPaddingTop(), right, icons.getPaddingBottom());
+        if (debugLog()) {
+            log(LOG_INFO, "out type: reserved " + reserve + "px, icon padding "
+                    + saved[0] + "/" + saved[1] + " -> " + left + "/" + right
+                    + ", icons w=" + icons.getWidth());
+        }
+    }
+
+    /** Hands the reserved strip back to the native icon row. Idempotent. */
+    private static void releaseOutTypeSpace(View batteryContainer) {
+        final View icons = iconContainerIn(batteryContainer);
+        if (icons == null) {
+            return;
+        }
+        final int[] saved = OUT_PAD_SAVED.remove(icons);
+        if (saved == null) {
+            return;
+        }
+        if (icons.getPaddingLeft() == saved[0] && icons.getPaddingRight() == saved[1]) {
+            return;
+        }
+        icons.setPadding(saved[0], icons.getPaddingTop(), saved[1], icons.getPaddingBottom());
+    }
+
+    /**
+     * The direct child of {@code container} that holds {@code host}, i.e. the
+     * {@code MiuiBatteryMeterView} the glyph is drawn in.
+     *
+     * <p>Found by walking the live parent chain rather than by class name, for
+     * the same reason {@link #batteryContainerOf} matches by name: the host is
+     * inflated through a wrapper whose loader chain does not expose SystemUI
+     * classes.
+     */
+    private static View meterIn(View host, View container) {
+        View child = host;
+        for (ViewParent p = host.getParent(); p != null;
+             p = (p instanceof View) ? ((View) p).getParent() : null) {
+            if (p == container) {
+                return child;
+            }
+            if (!(p instanceof View)) {
+                return null;
+            }
+            child = (View) p;
+        }
+        return null;
+    }
+
+    /** A registered glyph host living under {@code container}, or null. */
+    private static View hostIn(View container) {
+        synchronized (HOSTS) {
+            for (int i = 0; i < HOSTS.size(); i++) {
+                if (isDescendant(HOSTS.get(i).host, container)) {
+                    return HOSTS.get(i).host;
+                }
+            }
+        }
+        return null;
     }
 
     private static void hide(Object view) {

@@ -11,7 +11,10 @@ $ErrorActionPreference = 'Continue'
 $Root      = 'C:\code\HyperDuo'
 $AppDir    = Join-Path $Root 'app\src\main'
 $BuildDir  = Join-Path $Root 'build'
-$JavaHome  = Join-Path $Root '.tools\jdk\jdk-17.0.20.1+1'
+# 21 rather than 17 so the offline pipeline and the Gradle build share one JDK.
+# This path only compiles -source 8 Java, but a second JDK in the repo is one
+# more thing to keep in sync for no benefit.
+$JavaHome  = Join-Path $Root '.tools\jdk\jdk-21.0.12.1+1'
 $Sdk       = Join-Path $Root '.tools\sdk'
 $BuildTools= Join-Path $Sdk 'build-tools\37.0.0'
 $AndroidJar= Join-Path $Sdk 'platforms\android-37.0\android.jar'
