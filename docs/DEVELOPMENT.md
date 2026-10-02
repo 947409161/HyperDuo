@@ -758,6 +758,9 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
   截图 `v13-charging.png` / `v13-charge-wifi.png` / `v13-wifi.png`，裁图用
   `& "$env:JAVA_HOME\bin\java.exe" -cp work\overview\classes Crop <src> <dst> 1055 20 90 85 8`。
   取完把 Wi-Fi 关回 `off`、`dumpsys battery reset` 已确认（`USB powered: true` / `level: 100` 为真实状态）。
+  按字节复核「设备上跑的就是这一份」：`adb pull` 设备 `base.apk` 与
+  `app\build\outputs\apk\debug\app-debug.apk` SHA256 逐字相同
+  （`8F951FD65CC7B3625AA881FE021C96D3E701A7D64162BFB5829BA953FDA177C8`，33019398 B）。
   **修正记录**：早期实现让「居中 + 充电」时大闪电占圆心、数字缩到缺口，与「数字在居中模式下优先级最高」
   的语义相反；1.2 上机截图正是这个错误形态。`work\slotcheck\verify.ps1` 用同一探针在新旧两版之间对照
   （新版 exit 0 / 旧版 exit 1，6 项不符），并把 12 个非居中状态锁成逐像素不变。
