@@ -9,7 +9,7 @@
 | `namespace` / `applicationId` | `com.hyperduo.trio` |
 | `versionCode` / `versionName` | 源码里 2 / 1.1；发布时由 `release.ps1 -Version` 注入（见「发布流水线」） |
 | `minSdk` / `targetSdk` / `compileSdk` | 29 / 36 / 37 |
-| Java | 17 |
+| Java / Kotlin JVM target | 21（不是选择，见「构建」） |
 | 框架接口 | libxposed **API 102**（`minApiVersion=102`、`targetApiVersion=102`、`staticScope=true`） |
 | 作用域 | `com.android.systemui`（`app/src/main/resources/META-INF/xposed/scope.list`） |
 | 入口 | `com.hyperduo.trio.HyperDuoModule`（`java_init.list`） |
@@ -20,8 +20,11 @@
 依赖：`compileOnly io.github.libxposed:api:102.0.0`、`implementation io.github.libxposed:service:102.0.0`、
 `androidx.core:core-ktx:1.19.0`、`androidx.activity:activity-compose:1.13.0`、
 `org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0`（更新器要在主线程外做网络、
-回到主线程报状态，Compose 本身没有调度原语）、Miuix 0.9.3
-（`miuix-ui-android` / `miuix-preference-android` / `miuix-icons-android`）。
+回到主线程报状态，Compose 本身没有调度原语）、`kotlinx-serialization-json:1.11.0`（miuix-nav 的
+路由要 `@Serializable`）、Miuix **0.9.4**（`miuix-ui-android` / `miuix-preference-android` /
+`miuix-icons-android` / `miuix-blur-android` / `miuix-shader-android` / `miuix-nav-android`）。
+`miuix-blur` 声明 minSdk 33，本模块用 `<uses-sdk tools:overrideLibrary>` 把它压回 29 ——
+它内部每个效果都由 `isRuntimeShaderSupported()` 门控，33 以下是退化成普通绘制而不是崩溃。
 
 ## 源码结构
 
@@ -874,3 +877,27 @@ work\overview\                         全部支持样式的状态总览图（�
   改成 `footerLine(...)` 先 `getFontMetrics().stringWidth` 量宽、超宽直接 `throw`，
   立刻报出 `footer line overflows the page by 49px`。凡是定宽排版出图，都要让"画不下"变成
   异常而不是裁剪。
+- 教训（PowerShell 5.1 与 BOM）：工作树里的 `release.ps1` 丢过 UTF-8 BOM，PS 5.1 于是按 GBK
+  解码中文注释，多字节序列吞掉后面的引号，报出 8 个**指向完全正确行**的 parse error。凡在
+  PowerShell 5.1 下跑、且含中文的 `.ps1`，都要确认首字节是 `239,187,191`。已逐个按「解码后
+  是否出现乱码」判定：`release.ps1`（517 个汉字，**必须**带 BOM）、`install.ps1`（`install.ps1:66`
+  的 `Duo 三合一状态栏` 会被解成 `Duo 涓夊悎涓€鐘舵€佹爮`，已补 BOM，len 3140→3143）；
+  `env.ps1` / `build.ps1` 一个汉字都没有，无 BOM 也无所谓，保持原样。
+  BOM 有无只看 **parse error 是不够的**——`install.ps1` 在无 BOM 时 parse-errors 仍然是 0，
+  错的是运行时打印出来的字。
+- **1.1 发布**（`release.ps1 -Version 1.1 -NotesFile work\notes-1.1.md`，`exit 0`）：tag `v1.1`
+  → `03b36b5f5a0f95709255dbf85705da724da4cfb3`（与 `main` 同一提交，即构建的确实是已提交的代码）；
+  Release `HyperDuo 1.1` 非 draft / 非 prerelease，body 808 字符；asset `HyperDuo-1.1.apk`
+  3038076 B。**发布产物按字节复核**：从 `api.github.com/repos/…/releases/assets/605602727`
+  下载回来 SHA256 `9E024FA1A8988947DA9D6E694AC83B9A737FE7C2EC85C32CDB406C8414FBA6DC`
+  与本地 `dist\HyperDuo-1.1.apk` 逐字相同。签名 `CN=HyperDuo` 与设备上原装 APK 同一证书
+  （SHA-256 `b4e3a12d…8c41f`），所以能 `-r` 覆盖安装而不冲突。
+- **1.1 release 包上机验证**（这一步不可省：R8 会剥离反射用到的类）。`adb install -r` Success，
+  `versionCode=10100` / `versionName=1.1`、`pkgFlags` 里 **没有 `DEBUGGABLE`**（release 构建）。
+  类名在 dex 里是**斜杠描述符**（`Lcom/hyperduo/trio/TrioHooks;`），用点号搜会全部假阴性 ——
+  `TrioHooks` / `TrioRenderer` / `TrioConfig` / `Prefs` / `TrioSettings` / `HyperDuoModule` /
+  `ui/RestartController` 全部在 `classes.dex` 里，未被剥离。SystemUI 重启后
+  `HyperDuo installed, hooks=9 enabled=true`、`reload receiver registered`，无 `FATAL EXCEPTION`。
+  截图 `work\ondevice\release-1.1-statusbar.png` 目视确认：三合一图标正常（绿色充电弧 + `49` +
+  闪电 + 底部信号点），环外网络类型 `5G` 也画出来了。日志中对应
+  `out type: "5G" size=45.0 label=60x60 at 341,14 anchor=407..491 container=491x88`。
