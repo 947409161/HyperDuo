@@ -970,3 +970,15 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
   截图 `work\ondevice\release-1.1-statusbar.png` 目视确认：三合一图标正常（绿色充电弧 + `49` +
   闪电 + 底部信号点），环外网络类型 `5G` 也画出来了。日志中对应
   `out type: "5G" size=45.0 label=60x60 at 341,14 anchor=407..491 container=491x88`。
+- **1.3 发布**（`release.ps1 -Version 1.3 -NotesFile work\notes-1.3.md`，`exit 0`，构建耗时
+  1m19s）：tag `v1.3` → `e97f73d6347f842a21511db03f37cde299732c48`（与 `HEAD`/`main`
+  同一提交——`release.ps1` 构建工作树但给 `HEAD` 打 tag，所以**必须先提交干净再跑**）；
+  Release `HyperDuo 1.3` 非 draft / 非 prerelease（`draft=False` / `prerelease=False`），
+  body 496 字符，asset `HyperDuo-1.3.apk` 3038276 B。**发布产物按字节复核**：从
+  `https://github.com/yixing233/HyperDuo/releases/download/v1.3/HyperDuo-1.3.apk` 下载回来
+  SHA256 `2AAD1D6AA5920FBA4EA3F1E44B1349364752C81A9BA63675DA1D365EB2916EA1`
+  与本地 `dist\HyperDuo-1.3.apk` 逐字相同（R8 产物体积不固定，每次构建字节都不同，
+  所以「下载回来对哈希」这一步不能省）。`git ls-remote --tags` 确认远端有 `refs/tags/v1.3`。
+  **`v1.2` 从未打过 tag 也从未发布**——`dist\HyperDuo-1.2.apk` 只是本地产物（它含改名后的串
+  「电量数字居中」，但还不含居中的优先级修复）。所以 1.1 → 1.3 的用户一次性拿到改名 + 修复，
+  1.3 的 release notes 只写这两件事，不提 1.2。
