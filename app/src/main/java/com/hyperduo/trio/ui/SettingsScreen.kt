@@ -335,13 +335,13 @@ fun SettingsScreen(repository: SettingsRepository) {
     val restartTitle = stringResource(R.string.restart_title)
     val restartDone = stringResource(R.string.restart_done)
 
-    // Miuix's own host rather than a system toast: the snackbar is drawn on the
+    // Miuix's own host rather than a system Toast: the snackbar is drawn on the
     // same surface as the page that raised it, so it follows the theme and dies
     // with the screen instead of hovering over whatever comes next.
     //
-    // Short (4s) is the closest match to the LENGTH_LONG toasts these replaced;
-    // Miuix's Long runs ten seconds, which is a long time to look at one
-    // sentence, and the snackbar can be swiped away if even that is too long.
+    // Short (4s) rather than Long (10s): these messages are one short
+    // sentence, and ten seconds is a long time to look at one. The user can
+    // swipe the bar away if even four is too long.
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     // Remembered so the row callbacks below capture one stable value: a lambda

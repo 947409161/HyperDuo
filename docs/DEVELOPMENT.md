@@ -280,11 +280,12 @@ graphics layer，顶栏再通过同一个 `backdrop` 采样它——捕获源与
 
 ### 提示文案：Snackbar 与 Tooltip
 
-- 原先的 `android.widget.Toast` 已全部换成 Miuix `SnackbarHost`（`Scaffold(snackbarHost = ...)`）。
-  用它是因为它与页面同一个 surface、跟随主题、且随页面销毁而消失。时长选 `SnackbarDuration.Short`
-  （4000ms）而不是 `Long`（10000ms），因为被替换掉的 toast 是 `LENGTH_LONG` 的 ~3500ms。
-  所有弹出都收敛到一个 `showMessage: (String) -> Unit`，并用 `remember(scope, snackbarHostState)`
-  包住，避免每个接收它的行都被不稳定 lambda 拖着重绘。
+- 反馈改用 Miuix `SnackbarHost`（`Scaffold(snackbarHost = ...)`）。用它是因为它与页面同一个
+  surface、跟随主题、且随页面销毁而消失。时长选 `SnackbarDuration.Short`（4000ms）而不是
+  `Long`（10000ms）——两个数字取自反编译的 `SnackbarKt.toMillis`，不是猜的：这几条消息都是一句
+  话，十秒太长，而提示条本身还可以划走。所有弹出都收敛到一个 `showMessage: (String) -> Unit`，
+  并用 `remember(scope, snackbarHostState)` 包住，避免每个接收它的行都被不稳定 lambda 拖着重绘。
+  （1.0 的两条反馈文案是常驻行内文字，不是 Toast；git 历史里从未出现过 `android.widget.Toast`。）
 - 被复合门控灰显的行（例如需要先开总开关再开子开关）加 `TooltipBox` 长按提示，文案来自
   单条格式串 `R.string.gate_hint`（`需要先打开「%1$s」` / `Turn on "%1$s" first`），
   由 `gateHint(vararg gates: Pair<Boolean, Int>)` 取第一个未满足的开关名。提示通过
@@ -602,8 +603,9 @@ style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会
 | `arc_stroke` | `12` | 3 – 16 |
 | `value_size` | `36` | 16 – 44 |
 | `value_weight` | `700` | 100 – 900 |
-| `type_size` | `32` | 16 – 44 |
-| `type_weight` | `700` | 100 – 900 |
+| `type_size` | `32` | 16 – 44（只用于环内） |
+| `out_type_size` | `32` | 16 – 64（只用于环外；上界高于 `type_size`，见 `Prefs.java` 的说明） |
+| `type_weight` | `700` | 100 – 900（环内/环外共用） |
 | `track_alpha` | `56` | 0 – 255 |
 | `debug_log` | `false` | — |
 
@@ -741,9 +743,10 @@ work\overview\                         全部支持样式的状态总览图（�
   `long-clickable="true"` 节点（充电时显示闪电 / 显示网络类型 / Wi-Fi 与数字换位），打开后为 0，
   与「只有确实存在未打开前置开关的行才响应长按」的预期一致。**提示气泡本身未截到图**：
   取图前设备掉线，长按路径未走通；`gateHint` 的文案拼接由代码路径保证。
-- Snackbar 替换 Toast：`assembleDebug` / `compileDebugKotlin --rerun-tasks` 均通过且无警告。
+- 应用内提示条：`assembleDebug` / `compileDebugKotlin --rerun-tasks` 均通过且无警告。
   **提示条本身未截到图**——它只在更新安装失败或重启完成时弹出，前者需要远端存在新 Release，
-  后者会真的重启 SystemUI，都不适合为取图而触发。
+  后者会真的重启 SystemUI，都不适合为取图而触发。时长常量由反编译 Miuix 确认
+  （`SnackbarDuration.Short` = 4000ms、`Long` = 10000ms，见 `SnackbarKt.toMillis`）。
 - miuix-nav 接入：`assembleDebug` 通过（JDK 21 + JVM target 21）。解包 APK 后按 dex 字符串确认
   三件事都进了包：`miuix/kmp/nav/core/NavDisplayKt` 与 `NavController`、`NavBackStackKt`
   （`classes6.dex`），以及本模块的 `Route$General`、`SettingsPage`（`classes4.dex`）。
