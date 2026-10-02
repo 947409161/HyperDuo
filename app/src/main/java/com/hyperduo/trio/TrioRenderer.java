@@ -119,17 +119,22 @@ final class TrioRenderer {
 
         final boolean wifi = wifiInk(cfg, wifiLevel);
         final boolean hasType = mobileType != null && !mobileType.isEmpty();
-        final boolean swap = cfg.swapWifiValue;
+        // "Centred" mode enlarges the percentage into the middle of the ring and
+        // moves the Wi-Fi arcs up into the notch; the default keeps them the
+        // other way round. The stored key still reads "swap_wifi_value" - see
+        // Prefs.KEY_VALUE_CENTRED for why the name is frozen.
+        final boolean centred = cfg.valueCentred;
         // The bolt is drawn by this renderer and only while the percentage is
         // enabled, so it must be gated the same way: otherwise a ring could open
         // its mouth for a bolt that never gets drawn.
         final boolean bolt = charging && cfg.showBolt && cfg.showValue;
         // Two slots, each holding one thing. Which slot a thing lands in is the
-        // whole point of the swap: the ring centre, or the 12 o'clock notch.
-        final boolean boltInCentre = bolt && swap;
-        final boolean boltInGap = bolt && !swap;
-        final boolean wifiInCentre = wifi && !swap;
-        final boolean wifiInGap = wifi && swap;
+        // whole point of the centred mode: the ring centre, or the 12 o'clock
+        // notch.
+        final boolean boltInCentre = bolt && centred;
+        final boolean boltInGap = bolt && !centred;
+        final boolean wifiInCentre = wifi && !centred;
+        final boolean wifiInGap = wifi && centred;
         // The network type claims the ring centre only in the in-ring mode; both
         // off and out-of-ring leave the centre to the value, because out-of-ring
         // is drawn by a separate label view outside this canvas. It never
@@ -273,10 +278,10 @@ final class TrioRenderer {
     // -------------------------------------------------------------------- wifi
 
     /**
-     * @param gap {@code true} when the swap setting has moved the arcs up into
-     *   the 12 o'clock notch. The whole group is then translated and scaled on
-     *   the canvas, which keeps one set of reference coordinates for both slots -
-     *   the same trick the bolt uses.
+     * @param gap {@code true} when the centred-value setting has moved the arcs
+     *   up into the 12 o'clock notch. The whole group is then translated and
+     *   scaled on the canvas, which keeps one set of reference coordinates for
+     *   both slots - the same trick the bolt uses.
      */
     private static void drawWifi(Canvas c, int level, int fg, TrioSettings cfg, boolean gap) {
         final int save = gap ? c.save() : 0;
@@ -389,9 +394,9 @@ final class TrioRenderer {
      * coordinates stay readable, and it is saved/restored so nothing else moves.
      *
      * @param color bolt fill; amber while the battery reports quick charge.
-     * @param centre {@code true} to fill the middle of the ring (the swap
-     *   setting, and while charging there), {@code false} to sit in the
-     *   12 o'clock gap at the size the reference path implies.
+     * @param centre {@code true} to fill the middle of the ring (the
+     *   centred-value setting, and while charging there), {@code false} to sit in
+     *   the 12 o'clock gap at the size the reference path implies.
      */
     private static void drawBolt(Canvas c, int color, boolean centre) {
         final int save = c.save();

@@ -30,8 +30,8 @@
     <string name="mobile_type_inside">In the ring</string>
     <string name="mobile_type_outside">Outside the ring</string>
 
-    <string name="swap_wifi_value_title">Swap Wi-Fi and number</string>
-    <string name="swap_wifi_value_summary">Enlarge the percentage into the middle of the ring and shrink the Wi-Fi arcs into the top notch; while charging the big bolt takes the middle.</string>
+    <string name="value_centre_title">Centre the percentage</string>
+    <string name="value_centre_summary">Enlarge the percentage into the middle of the ring and shrink the Wi-Fi arcs into the top notch; while charging the big bolt takes the middle.</string>
 
     <string name="color_role_title">State colors</string>
     <string name="color_role_summary">Pick colors for low battery, charging and critical battery.</string>

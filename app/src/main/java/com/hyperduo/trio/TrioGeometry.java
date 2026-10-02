@@ -91,7 +91,7 @@ final class TrioGeometry {
     /** Vertical middle of the reference bolt, used to centre it in the ring. */
     static final float BOLT_MID_REF = 11.9f;
     /**
-     * Bolt scale for the swapped layout, where the bolt no longer shares the
+     * Bolt scale for the centred layout, where the bolt no longer shares the
      * notch with anything and can fill the ring. Matches the mass of the
      * percentage drawn at {@link #centreSize} for the default value size.
      */
@@ -212,10 +212,11 @@ final class TrioGeometry {
     /** Topmost ink of the outer arc, at its apex. */
     static final float W_TOP = W1_CY - W1_R;
     /**
-     * Scale of the Wi-Fi group when {@code Prefs.KEY_SWAP_WIFI_VALUE} moves it
-     * into the 12 o'clock notch. The notch is 69.6 units of chord at the mouth
-     * and the group is 49 wide at full size, so it has to shrink to read as a
-     * notch ornament rather than spill over the arc ends.
+     * Scale of the Wi-Fi group when the percentage is centred
+     * ({@code Prefs.KEY_VALUE_CENTRED}) and the group is moved into the 12
+     * o'clock notch. The notch is 69.6 units of chord at the mouth and the group
+     * is 49 wide at full size, so it has to shrink to read as a notch ornament
+     * rather than spill over the arc ends.
      */
     static final float GAP_WIFI_SCALE = 0.8f;
 

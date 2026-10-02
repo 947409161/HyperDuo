@@ -46,7 +46,7 @@ class SettingsRepository(context: Context) {
     fun setShowMobile(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_MOBILE, value)
     fun setShowValue(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_VALUE, value)
     fun setShowBolt(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_BOLT, value)
-    fun setSwapWifiValue(value: Boolean) = writeBoolean(Prefs.KEY_SWAP_WIFI_VALUE, value)
+    fun setValueCentred(value: Boolean) = writeBoolean(Prefs.KEY_VALUE_CENTRED, value)
     /** 0 = hidden, 1 = inside the ring, 2 = outside it. */
     fun setMobileTypeMode(value: Int) = writeInt(Prefs.KEY_MOBILE_TYPE_MODE, value)
 
@@ -116,7 +116,7 @@ class SettingsRepository(context: Context) {
             prefs.putBoolean(Prefs.KEY_SHOW_VALUE, snapshot.showValue)
             prefs.putBoolean(Prefs.KEY_SHOW_BOLT, snapshot.showBolt)
             prefs.putInt(Prefs.KEY_MOBILE_TYPE_MODE, snapshot.mobileTypeMode)
-            prefs.putBoolean(Prefs.KEY_SWAP_WIFI_VALUE, snapshot.swapWifiValue)
+            prefs.putBoolean(Prefs.KEY_VALUE_CENTRED, snapshot.valueCentred)
 
             prefs.putBoolean(Prefs.KEY_ROLE_COLORS, snapshot.roleColors)
             prefs.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, snapshot.criticalOnDark)

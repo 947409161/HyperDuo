@@ -398,9 +398,13 @@ graphics layer，顶栏再通过同一个 `backdrop` 采样它——捕获源与
 时约 `7 / 218.078 ≈ 0.032` 路径进度（7.79°），**校验像素时必须先扣掉这个渗出量**，否则正确渲染
 也会被判成越界。
 
-### Wi-Fi 与数字换位
+### 电量数字居中
 
-`swap_wifi_value` 打开后，`drawInto` 的两个「槽位」互换：
+设置里这一项叫「电量数字居中」，存储键却是 `swap_wifi_value` —— **键名冻结，不要改**。它是个布尔，
+已装用户可能已经打开过；换新键名会让那部分人的选择在升级后静默丢失（框架不做类型/名称迁移）。
+只有**标签**改过名：旧文案「Wi-Fi 与数字换位」描述的是机制，而用户要的是「数字居中」。
+
+打开后，`drawInto` 的两个「槽位」互换：
 
 | | 关（默认） | 开 |
 | --- | --- | --- |
@@ -410,6 +414,9 @@ graphics layer，顶栏再通过同一个 `backdrop` 采样它——捕获源与
 Wi-Fi 搬进缺口是靠 canvas 变换（`translate` + `scale`）完成的，几何常量仍是原始那套绝对值；
 闪电居中同理（`boltCentreOffsetX/Y` + `BOLT_CENTRE_SCALE`）。两者都在 `save()`/`restoreToCount()`
 里做变换，和 `drawBolt` 的既有写法一致。
+
+代码侧的符号（`Prefs.KEY_VALUE_CENTRED`、`TrioSettings.valueCentred`、`TrioRenderer` 里的 `centred`）
+都跟着标签改成了「居中」语义，只有那个字符串字面量保持 `"swap_wifi_value"`。
 
 ### 网络类型：环内与环外
 
@@ -593,7 +600,7 @@ style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会
 | `show_wifi` / `show_mobile` / `show_value` / `show_bolt` | `true` | — |
 | `mobile_type_mode` | `0`（关闭） | 0 – 2（关闭 / 环内 / 环外） |
 | `show_mobile_type` | `false` | 已废弃，只读用于迁移 |
-| `swap_wifi_value` | `false` | — |
+| `swap_wifi_value` | `false` | 「电量数字居中」的存储键；名字是历史遗留，**冻结不改** |
 | `role_colors` | `true` | — |
 | `color_critical_on_dark` / `color_critical_on_light` | `0xFFFF3B30` | — |
 | `color_charging_on_dark` / `color_charging_on_light` | `0xFF34C759` / `0xFF1F8F3D` | — |
@@ -683,7 +690,11 @@ work\overview\                         全部支持样式的状态总览图（�
 - 电池（顶部）10 格：充电中 / 快速充电 / 用电中（数字）/ 低电量 / 低电量模式 / 危险电量 /
   已充满 / 只显示圆环 / 无 Wi-Fi 时数字居中 / 无 Wi-Fi 时充电且数字居中。
 - Wi-Fi（中部）7 格：已连接 3 格 / 2 格 / 1 格 / Wi-Fi 开启未关联 / Wi-Fi 关闭或不可用 /
-  Wi-Fi 与数字换位 / 换位后充电（闪电居中）。
+  电量数字居中 / 居中后充电（闪电居中）。
+
+注意两个「居中」不是一回事，别混：电池组里的「**无 Wi-Fi 时**数字居中」是**自动**行为
+（`wifiInk` 为假时数字自己掉进圆心，没有开关），Wi-Fi 组里的「电量数字居中」才是那个**设置项**
+（`swap_wifi_value`，用户手动打开）。
 - 移动信号与网络类型 8 格：信号 4 格 / 2 格 / 无信号 / 网络类型环内 4G / 环内 5G / 环内 5GA /
   类型关闭 / 类型环外。**环外类型不由本 Canvas 绘制** —— 它由 `TrioHooks` 另建的
   `OutTypeLabel extends TextView` 画在电池表左侧，所以那一格是手绘标签示意，不是渲染器输出。
@@ -704,7 +715,7 @@ work\overview\                         全部支持样式的状态总览图（�
   `AndroidRuntime:E`；状态栏 / 锁屏 / 控制中心的原生 Wi-Fi、移动（含 `stacked_mobile`）、电池
   图标均被抑制；屏幕中央不再残留游离的「5G」；Wi-Fi 关闭时不画弧；深色背景下前景色取样正确；
   切换设置不重启 SystemUI 即生效。
-- 换位开关（`swap_wifi_value`）上机双向验证：关机位为「小闪电在顶部缺口 + 数字在圆心」，开机位
+- 居中开关（存储键 `swap_wifi_value`）上机双向验证：关机位为「小闪电在顶部缺口 + 数字在圆心」，开机位
   为「大闪电居中 + 数字缩到顶部缺口」，开 Wi-Fi 时 Wi-Fi 弧缩进缺口；切换即时生效，无需重启。
 - 更新器上机验证：无 Release 时点「检查更新」显示「作者尚未发布任何正式版本」（404 视为正常
   空答案而非失败），界面不卡死、不误报。
@@ -742,7 +753,7 @@ work\overview\                         全部支持样式的状态总览图（�
   **未在 API 29–32 设备上验证**——该分支只能确认编译与 manifest，实际分支是否退化成不透明底依赖
   真机或模拟器。
 - 门控提示（Tooltip）：语义层用 `uiautomator dump` 验证——总开关关闭时恰好 3 个
-  `long-clickable="true"` 节点（充电时显示闪电 / 显示网络类型 / Wi-Fi 与数字换位），打开后为 0，
+  `long-clickable="true"` 节点（充电时显示闪电 / 显示网络类型 / 电量数字居中），打开后为 0，
   与「只有确实存在未打开前置开关的行才响应长按」的预期一致。**提示气泡本身未截到图**：
   取图前设备掉线，长按路径未走通；`gateHint` 的文案拼接由代码路径保证。
 - 应用内提示条：`assembleDebug` / `compileDebugKotlin --rerun-tasks` 均通过且无警告。

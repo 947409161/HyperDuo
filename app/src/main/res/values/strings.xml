@@ -30,8 +30,8 @@
     <string name="mobile_type_inside">环内</string>
     <string name="mobile_type_outside">环外</string>
 
-    <string name="swap_wifi_value_title">Wi-Fi 与数字换位</string>
-    <string name="swap_wifi_value_summary">电量数字放大到圆环中间，Wi-Fi 弧缩到顶部缺口；充电时由大闪电占据圆心。</string>
+    <string name="value_centre_title">电量数字居中</string>
+    <string name="value_centre_summary">电量数字放大到圆环中间，Wi-Fi 弧缩到顶部缺口；充电时由大闪电占据圆心。</string>
 
     <string name="color_role_title">状态颜色</string>
     <string name="color_role_summary">分别为低电量、充电与危险电量指定颜色。</string>

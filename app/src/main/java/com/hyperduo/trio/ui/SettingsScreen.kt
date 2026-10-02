@@ -693,20 +693,21 @@ private fun LazyListScope.generalTab(
                 enabled = gated,
                 onSelectedIndexChange = { index -> update { repo -> repo.setMobileTypeMode(index) } },
             )
-            val swapHint = gateHint(
+            val centreHint = gateHint(
                 gated to R.string.master_title,
                 settings.showWifi to R.string.show_wifi_title,
                 settings.showValue to R.string.show_value_title,
             )
-            TooltipBox(text = swapHint.orEmpty(), enabled = swapHint != null) {
+            TooltipBox(text = centreHint.orEmpty(), enabled = centreHint != null) {
                 SwitchPreference(
-                    checked = settings.swapWifiValue,
-                    onCheckedChange = { value -> update { it.setSwapWifiValue(value) } },
-                    title = stringResource(R.string.swap_wifi_value_title),
-                    summary = stringResource(R.string.swap_wifi_value_summary),
+                    checked = settings.valueCentred,
+                    onCheckedChange = { value -> update { it.setValueCentred(value) } },
+                    title = stringResource(R.string.value_centre_title),
+                    summary = stringResource(R.string.value_centre_summary),
                     insideMargin = SettingsItemMargin,
-                    // Moving the arcs is pointless if either side of the swap is
-                    // switched off, so the row needs both of them on.
+                    // The arcs have to be drawn for "move them into the notch" to
+                    // mean anything, and the percentage has to be drawn for it to
+                    // be centred at all.
                     enabled = gated && settings.showWifi && settings.showValue,
                 )
             }

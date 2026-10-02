@@ -71,8 +71,18 @@ public final class Prefs {
      * "on" to {@link #MOBILE_TYPE_IN_RING} while the new key is absent.
      */
     public static final String KEY_SHOW_MOBILE_TYPE = "show_mobile_type";
-    /** Swaps the Wi-Fi arcs and the battery reading between ring centre and notch. */
-    public static final String KEY_SWAP_WIFI_VALUE = "swap_wifi_value";
+    /**
+     * Draws the battery percentage enlarged in the middle of the ring, with the
+     * Wi-Fi arcs shrunk into the 12 o'clock notch.
+     *
+     * <p>The stored name is frozen at {@code "swap_wifi_value"} and must never
+     * change: it is a boolean the user may already have set, and rewriting the
+     * key would silently reset that choice on every existing install. Only the
+     * <em>label</em> was renamed - the setting used to be presented as a swap
+     * between the two slots, which described the mechanism rather than what the
+     * user gets.
+     */
+    public static final String KEY_VALUE_CENTRED = "swap_wifi_value";
 
     public static final String KEY_ROLE_COLORS = "role_colors";
     public static final String KEY_COLOR_CRITICAL_ON_DARK = "color_critical_on_dark";
@@ -136,12 +146,13 @@ public final class Prefs {
     public static final int DEF_MOBILE_TYPE_MODE = MOBILE_TYPE_OFF;
     /**
      * Off by default: the shipped look keeps the Wi-Fi arcs in the middle of the
-     * ring. Turning this on mirrors the layout - the arcs move up into the 12
-     * o'clock notch and the battery reading (or the network type, or the enlarged
-     * charging bolt) takes the middle, drawn at
-     * {@link TrioGeometry#CENTRE_SIZE_RATIO} scale.
+     * ring and the battery reading small in the 12 o'clock notch.
+     *
+     * <p>Turning this on moves the percentage into the middle, drawn at
+     * {@link TrioGeometry#CENTRE_SIZE_RATIO} scale, and shrinks the arcs into the
+     * notch.
      */
-    public static final boolean DEF_SWAP_WIFI_VALUE = false;
+    public static final boolean DEF_VALUE_CENTRED = false;
 
     public static final boolean DEF_ROLE_COLORS = true;
     public static final int DEF_COLOR_CRITICAL_ON_DARK = 0xFFFF3B30;

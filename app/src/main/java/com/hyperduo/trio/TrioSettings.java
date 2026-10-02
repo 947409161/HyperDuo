@@ -30,11 +30,13 @@ public final class TrioSettings {
      */
     public int mobileTypeMode;
     /**
-     * Swaps the two slots: the Wi-Fi arcs move up into the 12 o'clock notch and
-     * the battery reading takes the middle of the ring, enlarged. While charging
-     * the bolt owns the middle and the arcs stay in the notch.
+     * Draws the battery percentage enlarged in the middle of the ring, with the
+     * Wi-Fi arcs shrunk into the 12 o'clock notch. While charging the bolt owns
+     * the middle and the arcs stay in the notch.
+     *
+     * <p>Stored under the frozen key {@link Prefs#KEY_VALUE_CENTRED}.
      */
-    public boolean swapWifiValue;
+    public boolean valueCentred;
 
     public boolean roleColors;
     public int criticalOnDark;
@@ -77,7 +79,7 @@ public final class TrioSettings {
         s.showValue = Prefs.DEF_SHOW_VALUE;
         s.showBolt = Prefs.DEF_SHOW_BOLT;
         s.mobileTypeMode = Prefs.DEF_MOBILE_TYPE_MODE;
-        s.swapWifiValue = Prefs.DEF_SWAP_WIFI_VALUE;
+        s.valueCentred = Prefs.DEF_VALUE_CENTRED;
 
         s.roleColors = Prefs.DEF_ROLE_COLORS;
         s.criticalOnDark = Prefs.DEF_COLOR_CRITICAL_ON_DARK;
@@ -112,7 +114,7 @@ public final class TrioSettings {
         s.showValue = p.getBoolean(Prefs.KEY_SHOW_VALUE, Prefs.DEF_SHOW_VALUE);
         s.showBolt = p.getBoolean(Prefs.KEY_SHOW_BOLT, Prefs.DEF_SHOW_BOLT);
         s.mobileTypeMode = readMobileTypeMode(p);
-        s.swapWifiValue = p.getBoolean(Prefs.KEY_SWAP_WIFI_VALUE, Prefs.DEF_SWAP_WIFI_VALUE);
+        s.valueCentred = p.getBoolean(Prefs.KEY_VALUE_CENTRED, Prefs.DEF_VALUE_CENTRED);
 
         s.roleColors = p.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = p.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -205,7 +207,7 @@ public final class TrioSettings {
         s.showValue = showValue;
         s.showBolt = showBolt;
         s.mobileTypeMode = mobileTypeMode;
-        s.swapWifiValue = swapWifiValue;
+        s.valueCentred = valueCentred;
 
         s.roleColors = roleColors;
         s.criticalOnDark = criticalOnDark;
@@ -253,7 +255,7 @@ public final class TrioSettings {
             case Prefs.KEY_SHOW_VALUE: showValue = src.showValue; return true;
             case Prefs.KEY_SHOW_BOLT: showBolt = src.showBolt; return true;
             case Prefs.KEY_MOBILE_TYPE_MODE: mobileTypeMode = src.mobileTypeMode; return true;
-            case Prefs.KEY_SWAP_WIFI_VALUE: swapWifiValue = src.swapWifiValue; return true;
+            case Prefs.KEY_VALUE_CENTRED: valueCentred = src.valueCentred; return true;
             case Prefs.KEY_ROLE_COLORS: roleColors = src.roleColors; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_DARK: criticalOnDark = src.criticalOnDark; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_LIGHT: criticalOnLight = src.criticalOnLight; return true;
@@ -294,7 +296,7 @@ public final class TrioSettings {
         s.showValue = bundle.getBoolean(Prefs.KEY_SHOW_VALUE, Prefs.DEF_SHOW_VALUE);
         s.showBolt = bundle.getBoolean(Prefs.KEY_SHOW_BOLT, Prefs.DEF_SHOW_BOLT);
         s.mobileTypeMode = readMobileTypeMode(bundle);
-        s.swapWifiValue = bundle.getBoolean(Prefs.KEY_SWAP_WIFI_VALUE, Prefs.DEF_SWAP_WIFI_VALUE);
+        s.valueCentred = bundle.getBoolean(Prefs.KEY_VALUE_CENTRED, Prefs.DEF_VALUE_CENTRED);
 
         s.roleColors = bundle.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = bundle.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -369,7 +371,7 @@ public final class TrioSettings {
         b.putBoolean(Prefs.KEY_SHOW_VALUE, showValue);
         b.putBoolean(Prefs.KEY_SHOW_BOLT, showBolt);
         b.putInt(Prefs.KEY_MOBILE_TYPE_MODE, mobileTypeMode);
-        b.putBoolean(Prefs.KEY_SWAP_WIFI_VALUE, swapWifiValue);
+        b.putBoolean(Prefs.KEY_VALUE_CENTRED, valueCentred);
 
         b.putBoolean(Prefs.KEY_ROLE_COLORS, roleColors);
         b.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, criticalOnDark);
