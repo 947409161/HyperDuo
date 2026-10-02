@@ -31,7 +31,7 @@
     <string name="mobile_type_outside">环外</string>
 
     <string name="value_centre_title">电量数字居中</string>
-    <string name="value_centre_summary">电量数字放大到圆环中间，Wi-Fi 弧缩到顶部缺口；充电时由大闪电占据圆心。</string>
+    <string name="value_centre_summary">电量数字放大到圆环中间并始终优先占据圆心。Wi-Fi 弧缩到顶部缺口，充电时改用小的闪电占用缺口（此时不画 Wi-Fi 弧），环内的网络类型也让位到缺口。</string>
 
     <string name="color_role_title">状态颜色</string>
     <string name="color_role_summary">分别为低电量、充电与危险电量指定颜色。</string>

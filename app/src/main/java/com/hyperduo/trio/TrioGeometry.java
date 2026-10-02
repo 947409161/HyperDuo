@@ -88,23 +88,6 @@ final class TrioGeometry {
         return BOLT_TOP - BOLT_TOP_REF * BOLT_SCALE;
     }
 
-    /** Vertical middle of the reference bolt, used to centre it in the ring. */
-    static final float BOLT_MID_REF = 11.9f;
-    /**
-     * Bolt scale for the centred layout, where the bolt no longer shares the
-     * notch with anything and can fill the ring. Matches the mass of the
-     * percentage drawn at {@link #centreSize} for the default value size.
-     */
-    static final float BOLT_CENTRE_SCALE = 2.6f;
-
-    static float boltCentreOffsetX() {
-        return BOLT_CX - BOLT_CX_REF * BOLT_CENTRE_SCALE;
-    }
-
-    static float boltCentreOffsetY() {
-        return CENTER_CY - BOLT_MID_REF * BOLT_CENTRE_SCALE;
-    }
-
     // ------------------------------------------------------------------- value
     static final float VALUE_X = 59.5f;
     static final float VALUE_BASELINE = 24f;

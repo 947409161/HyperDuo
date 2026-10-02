@@ -404,16 +404,32 @@ graphics layer，顶栏再通过同一个 `backdrop` 采样它——捕获源与
 已装用户可能已经打开过；换新键名会让那部分人的选择在升级后静默丢失（框架不做类型/名称迁移）。
 只有**标签**改过名：旧文案「Wi-Fi 与数字换位」描述的是机制，而用户要的是「数字居中」。
 
-打开后，`drawInto` 的两个「槽位」互换：
+打开后，`drawInto` 不再做「两个槽位互换」，而是一套**优先级**：电量数字永远第一顺位占圆心，
+其余符号依次让位。
 
-| | 关（默认） | 开 |
+| | 关（默认，行为未变） | 开 |
 | --- | --- | --- |
-| 圆心 | Wi-Fi 弧 | 电量数字（放大 `CENTRE_SIZE_RATIO` 倍）/ 网络类型 / 充电闪电 |
-| 顶部缺口 | 电量数字 / 闪电 | Wi-Fi 弧（缩小到 `GAP_WIFI_SCALE`） |
+| 圆心 | Wi-Fi 弧；无 Wi-Fi 且未选环内类型时是电量数字 | 电量数字（放大 `CENTRE_SIZE_RATIO` 倍）——只要 `show_value` 且电量已知就必定是它 |
+| 顶部缺口 | 电量数字 / 闪电 | Wi-Fi 弧（缩小到 `GAP_WIFI_SCALE`）/ 充电时的小闪电 / 让位出来的环内网络类型 |
 
-Wi-Fi 搬进缺口是靠 canvas 变换（`translate` + `scale`）完成的，几何常量仍是原始那套绝对值；
-闪电居中同理（`boltCentreOffsetX/Y` + `BOLT_CENTRE_SCALE`）。两者都在 `save()`/`restoreToCount()`
-里做变换，和 `drawBolt` 的既有写法一致。
+三条让位规则都只作用于 `centred == true`：
+
+1. **闪电恒落缺口**。`boltInCentre` / `boltInGap` 这对变量已删除，`drawBolt(Canvas c, int color)`
+   只剩一个落点，固定用 `boltOffsetX/Y` + `BOLT_SCALE`（原居中几何 `BOLT_CENTRE_SCALE`、
+   `boltCentreOffsetX/Y` 已从 `TrioGeometry` 移除）。闪电占缺口时**整组 Wi-Fi 弧不画**，
+   门是 `cfg.showWifi && (!centred || wifiInGap)` —— 不能只把 `wifiInGap` 置假，否则
+   `drawWifi(..., false)` 会把弧画回圆心压在数字上。
+2. **缺口归闪电时用窄嘴**。`gapUsed` 的门与 `GAP_START/END_CHARGE` 的选择只看 `bolt`，
+   不再看闪电落在哪个槽位。
+3. **环内网络类型让位**。`valueInCentre` 生效时数字占圆心，类型改由新增的
+   `drawGapType(Canvas c, String type, int fg, TrioSettings cfg)` 画进缺口（`gapClearWidth` +
+   `gapBaseline`，用 `cfg.typeSize` / `cfg.typeWeight`）；圆心空出来时才回到 `drawCentreType`。
+
+Wi-Fi 搬进缺口仍是 canvas 变换（`translate` + `scale`）完成的，几何常量仍是原始那套绝对值，
+在 `save()`/`restoreToCount()` 里做。
+
+`centred == false` 时这套式子化简回改动前的判定（`wifiInGap` 与 `typeInGap` 恒为假），
+`work\slotcheck\verify.ps1` 用 12 个非居中状态在新旧两版之间逐像素对照，专门锁住这一点。
 
 代码侧的符号（`Prefs.KEY_VALUE_CENTRED`、`TrioSettings.valueCentred`、`TrioRenderer` 里的 `centred`）
 都跟着标签改成了「居中」语义，只有那个字符串字面量保持 `"swap_wifi_value"`。
@@ -422,10 +438,11 @@ Wi-Fi 搬进缺口是靠 canvas 变换（`translate` + `scale`）完成的，几
 
 `mobile_type_mode` 三档：`0` 关闭、`1` 环内、`2` 环外。**选项顺序即存储值**。
 
-- **环内**（`1`）走渲染器：`TrioRenderer.drawInto` 的决策块在
-  `cfg.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING && hasType && !wifi && !boltInCentre`
-  时把网络类型放进圆心（`TrioRenderer.java:137`），电量数字让位到顶部缺口。它**不查
-  `show_value`** —— 与闪电（`showBolt && showValue`）不同。
+- **环内**（`1`）走渲染器：`TrioRenderer.drawInto` 的决策块先判 `typeInRing =
+  cfg.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING && mobileType != null && !mobileType.isEmpty()`，
+  再按圆心是否已被电量数字占用分流：`typeInCentre = typeInRing && !wifi && !valueInCentre`，
+  `typeInGap = typeInRing && valueInCentre && !wifi && !bolt`。即**数字优先**，类型退到顶部缺口；
+  没有数字可展示时才回到圆心。它**不查 `show_value`** —— 与闪电（`showBolt && showValue`）不同。
 - **环外**（`2`）不是 canvas 绘制。宿主画布只有 `battery_meter_width = 28dp` ×
   `status_bar_icon_height = 20dp`，装不下环外的字，所以模块**自己往电池容器里新增一个
   `TextView`**：`TrioHooks.OutTypeLabel`（`TrioHooks.java` 的 `out-of-ring type label` 区块）。
@@ -476,7 +493,7 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 
 快充由 `TrioState` 反射读 `mQuickCharging`（与 `mCharging`）得到，**只改闪电颜色**（琥珀色
 `TrioGeometry.QUICK_CHARGE`），不改形状或大小 —— 见 `TrioRenderer.drawBolt(Canvas c, int color)`
-（`TrioRenderer.java:357`）的注释：*bolt fill; amber while the battery reports quick charge*。
+（`TrioRenderer.java:426`）的注释：*bolt fill; amber while the battery reports quick charge*。
 
 ### 预览与状态栏共用几何
 
@@ -679,6 +696,17 @@ work\overview\                         全部支持样式的状态总览图（�
 `exit 1`（旧算法在 45/55/60/70/75% 上共 42 项不符）——**两边都跑才说明探针真的在测这个 bug**；
 只跑通过的那一边等于没有反例。探针同时产出 `work\gapcheck\out\mouth-{old,new}.png` 对照图。
 
+另有 `work\slotcheck\verify.ps1`（不入库）盯**居中模式的槽位优先级**。它把同一份 `SlotProbe` 跑两遍
+（工作树一份、`git show HEAD:` 重建的旧渲染器一份，旧源必须先断言含 `boltCentreOffsetX`、不含
+`drawGapType`），用**无色不变量**判定：圆心圆盘（`CENTER_CY` 处半径 18 设计单位）内的像素在「有闪电」
+与「无闪电」两种渲染下必须逐像素相同——低电量角色色 `0xFFF2B900` 与快充琥珀色 `0xFFFFBA28` 太近，
+按颜色计数不可靠，所以只比像素。渲染时置 `cfg.roleColors = false`，否则数字颜色会随充电标志变化而
+掩盖结论。另有对照组防空洞：未居中 + Wi-Fi 3 与居中 + Wi-Fi 3 的圆心盘哈希必须不同，否则「有/无闪电
+相同」什么都没测。新版必须 `exit 0`、旧版必须 `exit 1`（旧版 6 项不符：闪电落在圆心、缺口无琥珀、
+Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被改动），同时要求 12 个非居中状态在新旧
+两版之间哈希逐行相等，锁住「本改动只影响居中模式」。探针产出 `work\slotcheck\out\slots-{old,new}.png`
+六格对照图。
+
 另有 `work\overview\run.ps1`（不入库）：把渲染器**实际支持的每一个样式**画成一张状态总览图
 `work\overview\out\overview.png`（1788×2214，3 组共 25 格）。它复用 `work\preview` 的桌面垫片，
 每格都以 `TrioSettings.defaults()` 为底再叠加该格的单项 tweak，因此代表的始终是出厂外观。用途有二：
@@ -690,7 +718,7 @@ work\overview\                         全部支持样式的状态总览图（�
 - 电池（顶部）10 格：充电中 / 快速充电 / 用电中（数字）/ 低电量 / 低电量模式 / 危险电量 /
   已充满 / 只显示圆环 / 无 Wi-Fi 时数字居中 / 无 Wi-Fi 时充电且数字居中。
 - Wi-Fi（中部）7 格：已连接 3 格 / 2 格 / 1 格 / Wi-Fi 开启未关联 / Wi-Fi 关闭或不可用 /
-  电量数字居中 / 居中后充电（闪电居中）。
+  电量数字居中 / 居中后充电（闪电在缺口）。
 
 注意两个「居中」不是一回事，别混：电池组里的「**无 Wi-Fi 时**数字居中」是**自动**行为
 （`wifiInk` 为假时数字自己掉进圆心，没有开关），Wi-Fi 组里的「电量数字居中」才是那个**设置项**
@@ -715,8 +743,11 @@ work\overview\                         全部支持样式的状态总览图（�
   `AndroidRuntime:E`；状态栏 / 锁屏 / 控制中心的原生 Wi-Fi、移动（含 `stacked_mobile`）、电池
   图标均被抑制；屏幕中央不再残留游离的「5G」；Wi-Fi 关闭时不画弧；深色背景下前景色取样正确；
   切换设置不重启 SystemUI 即生效。
-- 居中开关（存储键 `swap_wifi_value`）上机双向验证：关机位为「小闪电在顶部缺口 + 数字在圆心」，开机位
-  为「大闪电居中 + 数字缩到顶部缺口」，开 Wi-Fi 时 Wi-Fi 弧缩进缺口；切换即时生效，无需重启。
+- 居中开关（存储键 `swap_wifi_value`）上机双向验证：关机位为「Wi-Fi 弧在圆心（无 Wi-Fi 时数字自动落圆心）」，
+  开机位为「数字恒在圆心 / Wi-Fi 弧缩进顶部缺口 / 充电时小闪电占缺口且弧整组不画 / 环内网络类型退到缺口」；
+  切换即时生效，无需重启。**修正记录**：早期实现让「居中 + 充电」时大闪电占圆心、数字缩到缺口，与
+  「数字在居中模式下优先级最高」的语义相反；`work\slotcheck\verify.ps1` 用同一探针在新旧两版之间对照
+  （新版 exit 0 / 旧版 exit 1，6 项不符），并把 12 个非居中状态锁成逐像素不变。
 - 更新器上机验证：无 Release 时点「检查更新」显示「作者尚未发布任何正式版本」（404 视为正常
   空答案而非失败），界面不卡死、不误报。
 - 更新器端到端验证（真机）：把 debug 包故意装成 0.9(900)，走完「检查更新 → 下载更新 → 安装」，

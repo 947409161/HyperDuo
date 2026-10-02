@@ -118,7 +118,6 @@ final class TrioRenderer {
         final int role = roleColor(cfg, level, charging, powerSave, low, fg);
 
         final boolean wifi = wifiInk(cfg, wifiLevel);
-        final boolean hasType = mobileType != null && !mobileType.isEmpty();
         // "Centred" mode enlarges the percentage into the middle of the ring and
         // moves the Wi-Fi arcs up into the notch; the default keeps them the
         // other way round. The stored key still reads "swap_wifi_value" - see
@@ -126,35 +125,39 @@ final class TrioRenderer {
         final boolean centred = cfg.valueCentred;
         // The bolt is drawn by this renderer and only while the percentage is
         // enabled, so it must be gated the same way: otherwise a ring could open
-        // its mouth for a bolt that never gets drawn.
+        // its mouth for a bolt that never gets drawn. It always sits in the
+        // 12 o'clock notch: the ring centre belongs to the percentage in both
+        // layouts, so nothing has to move it aside.
         final boolean bolt = charging && cfg.showBolt && cfg.showValue;
-        // Two slots, each holding one thing. Which slot a thing lands in is the
-        // whole point of the centred mode: the ring centre, or the 12 o'clock
-        // notch.
-        final boolean boltInCentre = bolt && centred;
-        final boolean boltInGap = bolt && !centred;
-        final boolean wifiInCentre = wifi && !centred;
-        final boolean wifiInGap = wifi && centred;
-        // The network type claims the ring centre only in the in-ring mode; both
-        // off and out-of-ring leave the centre to the value, because out-of-ring
-        // is drawn by a separate label view outside this canvas. It never
-        // competes with the bolt either: a bolt at the centre outranks it.
-        final boolean typeInCentre = cfg.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING
-                && hasType && !wifi && !boltInCentre;
-        final boolean valueInCentre = cfg.showValue && level >= 0
-                && !typeInCentre && !wifiInCentre && !boltInCentre;
-        final boolean valueInGap = cfg.showValue && level >= 0
-                && !valueInCentre && !wifiInGap && !boltInGap;
+        // The network type is drawn inside the ring only in the in-ring mode;
+        // off and out-of-ring leave it alone, because out-of-ring is a separate
+        // label view outside this canvas.
+        final boolean typeInRing = cfg.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING
+                && mobileType != null && !mobileType.isEmpty();
+        // Two slots, each holding one thing: the ring centre, or the 12 o'clock
+        // notch. Which slot a thing lands in is the whole point of the centred
+        // mode. There the percentage owns the centre outright - that is what the
+        // setting promises - so the bolt and the network type both give way into
+        // the notch rather than pushing the percentage out of it.
+        final boolean hasValue = cfg.showValue && level >= 0;
+        final boolean valueInCentre = hasValue && (centred || (!wifi && !typeInRing));
+        final boolean valueInGap = hasValue && !valueInCentre && !bolt;
+        // The notch holds one thing. The bolt outranks the arcs, because a
+        // charging icon has to read at a glance, and the arcs outrank the
+        // network type, as they already do for the ring centre.
+        final boolean wifiInGap = wifi && centred && !bolt;
+        final boolean typeInCentre = typeInRing && !wifi && !valueInCentre;
+        final boolean typeInGap = typeInRing && valueInCentre && !wifi && !bolt;
         // The top gap is open only while something is actually drawn in it. An
         // empty mouth just breaks the ring, so it closes instead.
-        final boolean gapUsed = boltInGap || wifiInGap || valueInGap;
+        final boolean gapUsed = bolt || wifiInGap || valueInGap || typeInGap;
         // Only the bolt wants the narrower charging mouth; the digits and the
         // arcs need all the room the idle mouth gives them.
         final float gapStart = gapUsed
-                ? (boltInGap ? TrioGeometry.GAP_START_CHARGE : TrioGeometry.GAP_START_IDLE)
+                ? (bolt ? TrioGeometry.GAP_START_CHARGE : TrioGeometry.GAP_START_IDLE)
                 : TrioGeometry.GAP_NONE;
         final float gapEnd = gapUsed
-                ? (boltInGap ? TrioGeometry.GAP_END_CHARGE : TrioGeometry.GAP_END_IDLE)
+                ? (bolt ? TrioGeometry.GAP_END_CHARGE : TrioGeometry.GAP_END_IDLE)
                 : TrioGeometry.GAP_NONE;
 
         final int save = canvas.save();
@@ -164,7 +167,10 @@ final class TrioRenderer {
         canvas.scale(scale, scale);
 
         drawBattery(canvas, level, role, fg, cfg, gapStart, gapEnd);
-        if (cfg.showWifi) {
+        // When the percentage is centred the arcs only ever appear in the notch,
+        // so a bolt that has taken the notch suppresses them outright rather than
+        // letting them fall back onto the digits at the centre.
+        if (cfg.showWifi && (!centred || wifiInGap)) {
             drawWifi(canvas, wifiLevel, fg, cfg, wifiInGap);
         }
         if (cfg.showMobile) {
@@ -173,8 +179,11 @@ final class TrioRenderer {
         if (typeInCentre) {
             drawCentreType(canvas, mobileType, fg, cfg);
         }
+        if (typeInGap) {
+            drawGapType(canvas, mobileType, fg, cfg);
+        }
         if (bolt) {
-            drawBolt(canvas, quickCharging ? TrioGeometry.QUICK_CHARGE : fg, boltInCentre);
+            drawBolt(canvas, quickCharging ? TrioGeometry.QUICK_CHARGE : fg);
         }
         if (valueInCentre || valueInGap) {
             drawValue(canvas, level, fg, cfg, valueInCentre);
@@ -351,9 +360,8 @@ final class TrioRenderer {
     /**
      * Draws the value in whichever slot it belongs to.
      *
-     * @param centre {@code true} to put the percentage in the middle of the ring
-     *   (the Wi-Fi arcs and the network type are both absent), {@code false} to
-     *   keep it in the 12 o'clock gap next to the charging bolt.
+     * @param centre {@code true} to put the percentage in the middle of the ring,
+     *   {@code false} to keep it in the 12 o'clock gap next to the charging bolt.
      */
     private static void drawValue(Canvas c, int level, int fg, TrioSettings cfg, boolean centre) {
         final String text = String.valueOf(level);
@@ -375,7 +383,7 @@ final class TrioRenderer {
     /**
      * Draws the mobile network type ("5G", "5GA", ...) in the middle of the ring.
      *
-     * <p>Only reached when the top gap already carries the percentage, so this
+     * <p>Reached only when the percentage is not claiming the centre, so this
      * never competes with the value for the same space.
      */
     private static void drawCentreType(Canvas c, String type, int fg, TrioSettings cfg) {
@@ -389,24 +397,36 @@ final class TrioRenderer {
     }
 
     /**
+     * Draws the mobile network type in the 12 o'clock gap. Used when the
+     * percentage has taken the ring centre, which is what the centred-value
+     * setting promises, and the notch is otherwise empty: the type is squeezed
+     * down to whatever the narrower slot affords rather than being dropped.
+     */
+    private static void drawGapType(Canvas c, String type, int fg, TrioSettings cfg) {
+        final float requested = cfg.typeSize;
+        final float clear = TrioGeometry.gapClearWidth(cfg.ringStroke);
+        applyWeight(cfg.typeWeight);
+        final float size = fitSize(type, requested, clear);
+        TEXT.setTextSize(size);
+        TEXT.setColor(fg);
+        c.drawText(type, TrioGeometry.VALUE_X, TrioGeometry.gapBaseline(size), TEXT);
+    }
+
+    /**
      * Draws the charging bolt scaled up from its reference path. The transform is
      * applied to the canvas rather than baked into the path so the reference
      * coordinates stay readable, and it is saved/restored so nothing else moves.
      *
+     * <p>The bolt lives in the 12 o'clock gap at the size the reference path
+     * implies. It is never enlarged into the ring centre: that slot belongs to
+     * the percentage, which is the point of the centred-value setting.
+     *
      * @param color bolt fill; amber while the battery reports quick charge.
-     * @param centre {@code true} to fill the middle of the ring (the
-     *   centred-value setting, and while charging there), {@code false} to sit in
-     *   the 12 o'clock gap at the size the reference path implies.
      */
-    private static void drawBolt(Canvas c, int color, boolean centre) {
+    private static void drawBolt(Canvas c, int color) {
         final int save = c.save();
-        if (centre) {
-            c.translate(TrioGeometry.boltCentreOffsetX(), TrioGeometry.boltCentreOffsetY());
-            c.scale(TrioGeometry.BOLT_CENTRE_SCALE, TrioGeometry.BOLT_CENTRE_SCALE);
-        } else {
-            c.translate(TrioGeometry.boltOffsetX(), TrioGeometry.boltOffsetY());
-            c.scale(TrioGeometry.BOLT_SCALE, TrioGeometry.BOLT_SCALE);
-        }
+        c.translate(TrioGeometry.boltOffsetX(), TrioGeometry.boltOffsetY());
+        c.scale(TrioGeometry.BOLT_SCALE, TrioGeometry.BOLT_SCALE);
         FILL.setColor(color);
         c.drawPath(BOLT, FILL);
         c.restoreToCount(save);
