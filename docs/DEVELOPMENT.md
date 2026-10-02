@@ -697,18 +697,21 @@ work\overview\                         全部支持样式的状态总览图（�
 只跑通过的那一边等于没有反例。探针同时产出 `work\gapcheck\out\mouth-{old,new}.png` 对照图。
 
 另有 `work\slotcheck\verify.ps1`（不入库）盯**居中模式的槽位优先级**。它把同一份 `SlotProbe` 跑两遍
-（工作树一份、`git show HEAD:` 重建的旧渲染器一份，旧源必须先断言含 `boltCentreOffsetX`、不含
-`drawGapType`），用**无色不变量**判定：圆心圆盘（`CENTER_CY` 处半径 18 设计单位）内的像素在「有闪电」
-与「无闪电」两种渲染下必须逐像素相同——低电量角色色 `0xFFF2B900` 与快充琥珀色 `0xFFFFBA28` 太近，
+（工作树一份、`git show 312ae00:` 重建的旧渲染器一份，旧源必须先断言含 `boltCentreOffsetX`、不含
+`drawGapType`）。**基线必须是写死的修订号，不能是 `HEAD`**：修复未提交时 `HEAD` 正好是旧版，
+提交之后 `HEAD` 就是修复本身，探针会拿自己和自己比、然后「证明」一件它没测过的事——本脚本在
+提交后确实这样假绿过一次，是被那句 `boltCentreOffsetX` 断言拦下的，所以那道断言不是多余的。
+判定用**无色不变量**：圆心圆盘（`CENTER_CY` 处半径 18 设计单位）内的像素在「有闪电」与「无闪电」
+两种渲染下必须逐像素相同——低电量角色色 `0xFFF2B900` 与快充琥珀色 `0xFFFFBA28` 太近，
 按颜色计数不可靠，所以只比像素。渲染时置 `cfg.roleColors = false`，否则数字颜色会随充电标志变化而
 掩盖结论。另有对照组防空洞：未居中 + Wi-Fi 3 与居中 + Wi-Fi 3 的圆心盘哈希必须不同，否则「有/无闪电
 相同」什么都没测。新版必须 `exit 0`、旧版必须 `exit 1`（旧版 6 项不符：闪电落在圆心、缺口无琥珀、
 Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被改动），同时要求 12 个非居中状态在新旧
 两版之间哈希逐行相等，锁住「本改动只影响居中模式」。探针产出 `work\slotcheck\out\slots-{old,new}.png`
-六格对照图。
+六格对照图，格下说明走 `caption` 逐字换行并对超宽/超高一并 `throw`（同样是「宁可失败也别裁字」）。
 
 另有 `work\overview\run.ps1`（不入库）：把渲染器**实际支持的每一个样式**画成一张状态总览图
-`work\overview\out\overview.png`（1788×2214，3 组共 25 格）。它复用 `work\preview` 的桌面垫片，
+`work\overview\out\overview.png`（1788×2248，3 组共 25 格）。它复用 `work\preview` 的桌面垫片，
 每格都以 `TrioSettings.defaults()` 为底再叠加该格的单项 tweak，因此代表的始终是出厂外观。用途有二：
 一是改渲染器后一眼看全所有样式的回归（新样式没进这张图就等于没被清点），二是给用户/文档出图。
 出图脚本会打印被编译的 `TrioRenderer.java` 的 SHA256，便于确认图对应哪份代码。
@@ -913,10 +916,13 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
   `mx >= 90` 会把背景 `#656563` 一起算成轨道（13144 px，圆心被拖到背景里）。正确做法是先按
   目视取粗略圆心做环形预筛（`18 < d < 34`）再拟合，且背景灰度必须排除。
 - **全量样式总览图**（对照 macOS 版 `Status Trio` 总览图出的图）：`work\overview\run.ps1`
-  `exit 0`，`work\overview\out\overview.png`，`1788×2214`，3 组共 **25 格**，
-  `renderer = 207c17d0acd87680d15ae959e3525e7849027bdc58b12ae4c13a2dc3ca36820a`
+  `exit 0`，`work\overview\out\overview.png`，`1788×2248`，3 组共 **25 格**，
+  `renderer = 92f6733e0b52a58409b17d26270b6a6fc0fa3152978c2cd62d2c5262bb9bb420`
   （即出图时 `TrioRenderer.java` 的 SHA256，用来确认图对应哪份代码）。放大目视核对
-  `crop-battery.png`(2x) / `crop-wifi.png`(2x) / `crop-mobile.png`(2x) 逐格正确。
+  `crop-battery.png`(2x) / `crop-wifi.png`(2x) / `crop-mobile.png`(2x) / `crop-footer.png`(2x) 逐格正确；
+  Wi-Fi 组末格「居中后充电」现在画的是**缺口里的小闪电 + 圆心数字**，与改动前的「闪电居中」相反。
+  **页脚长这样是有守卫的**：`footerLine` 用 `FontMetrics.stringWidth` 量宽并 `throw`，宁可出图失败
+  也不让文字被裁掉——本页新增的居中说明行第一次就超宽 76px 被它拦下，改为更短的句子才通过。
   **清点结论**：参考图的「蓝牙音频」4 格与「音量」7 格在本模块无任何实现
   （`volume|bluetooth|audio|headset|earbud` 零匹配），「已连接电源，未充电」也没有对应状态
   （渲染器只有充电 / 未充电两态），这三类都不应画进图里 —— 详见「测试」一节的样式清单。
