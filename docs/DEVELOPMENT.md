@@ -982,3 +982,18 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
   **`v1.2` 从未打过 tag 也从未发布**——`dist\HyperDuo-1.2.apk` 只是本地产物（它含改名后的串
   「电量数字居中」，但还不含居中的优先级修复）。所以 1.1 → 1.3 的用户一次性拿到改名 + 修复，
   1.3 的 release notes 只写这两件事，不提 1.2。
+- **1.3 release 包上机验证**（这一步不可省：R8 会剥离反射用到的类，而 debug 包不会暴露这个
+  风险）。三个构建类型共用同一个签名配置（`app\build.gradle.kts:26-49`：`debug` 与 `release`
+  都取 `signingConfigs.getByName("hyperduo")`，keystore `.tools/debug.keystore`、alias
+  `hyperduo`），所以**正式包能直接 `-r` 覆盖 debug 包**——但两者证书必须一致，实测
+  `keytool` 的 `SHA256: B4:E3:A1:2D:…:C4:1F` 与 `apksigner verify --print-certs` 打印的
+  `b4e3a12d03957e441c3ccf2e4e2be55de0db35fc5eb9aa8ac49a0a9d7298c41f` 相同（也就是设备上
+  原装 APK 的同一证书）。
+  `adb install -r dist\HyperDuo-1.3.apk` Success；`versionCode=10300` / `versionName=1.3`。
+  **按字节证明装进去的就是发布包**：`pm path` 取 codePath 后 `adb pull` 出 `base.apk`，
+  SHA256 `2AAD1D6AA5920FBA4EA3F1E44B1349364752C81A9BA63675DA1D365EB2916EA1`（3038276 B）
+  与 `dist\HyperDuo-1.3.apk` 以及从 GitHub 下载回来的那份**三者逐字相同**。SystemUI 重启后
+  `HyperDuo installed, hooks=9 enabled=true`、`reload receiver registered`，无 `FATAL EXCEPTION`
+  ——反射入口在 R8 下存活。截图 `work\ondevice\release-1.3-statusbar.png`（裁切放大
+  `release-1.3-icon-4x.png`）目视确认居中优先级修复在正式包里生效：**缺口里是小闪电、
+  圆心是 `100`**（若拿 debug 包验证，就等于没验证 R8 这一层）。
