@@ -271,10 +271,17 @@ if ($KeepOldReleases) {
 if ($SkipModuleRepo) {
     Write-Host '==> -SkipModuleRepo：跳过 Xposed 模块仓，只发主仓' -ForegroundColor Yellow
 } else {
-    $moduleArgs = @('-Version', $Version, '-VersionCode', $code, '-Apk', $target)
-    if ($Notes)           { $moduleArgs += @('-Notes', $Notes) }
-    if ($Force)           { $moduleArgs += '-Force' }
-    if ($KeepOldReleases) { $moduleArgs += '-KeepOldReleases' }
+    # A hashtable splat, not an array one: an array splat passes its elements
+    # *positionally*, so '-VersionCode' would be bound to the Apk parameter and
+    # the call would fail with "找不到接受实际参数". Named keys are required.
+    $moduleArgs = @{
+        Version     = $Version
+        VersionCode = $code
+        Apk         = $target
+    }
+    if ($Notes)           { $moduleArgs.Notes = $Notes }
+    if ($Force)           { $moduleArgs.Force = $true }
+    if ($KeepOldReleases) { $moduleArgs.KeepOldReleases = $true }
     try {
         & (Join-Path $PSScriptRoot 'release-module.ps1') @moduleArgs
     } catch {
