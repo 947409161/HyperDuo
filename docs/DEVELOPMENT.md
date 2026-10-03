@@ -125,14 +125,18 @@ release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro
 
 ### 发布流水线
 
-发布是**一条本地命令**，没有 CI：
+发布是**一条本地命令**，没有 CI。主仓发完再发模块仓（两处都发同一个 APK）：
 
 ```powershell
-.\release.ps1 -Version 1.0 -NotesFile .\work\notes.md
+.\release.ps1 -Version 1.0 -NotesFile .\release-notes-1.0.md
 .\release.ps1 -Version 1.0 -DryRun      # 只构建，不打 tag、不建 Release
+
+# 主仓成功后，同版本再发一次 LSPosed 模块仓（模块页的下载链接走这里）
+.\release-module.ps1 -Version 1.0 -VersionCode 10000 `
+    -Apk .\dist\HyperDuo-1.0.apk -NotesFile .\release-notes-1.0.md
 ```
 
-`release.ps1` 按顺序做四件事，任何一步失败都立刻停下：
+`release.ps1` 按顺序做五件事，任何一步失败都立刻停下：
 
 1. 校验版本号（`major` / `major.minor` / `major.minor.patch`，缺段按 0 计），算出
    `versionCode = major*10000 + minor*100 + patch`。
@@ -142,6 +146,32 @@ release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro
    与预期不符就中止 —— 版本注入写错时这一步会立刻暴露，而不是等用户装上才发现。
 4. 打并推送 `v<version>` tag，创建 GitHub Release（`git credential fill` 取凭据，不存明文
    token），最后上传 APK asset。
+5. **清掉仓库里其它所有 Release**，只留刚发的这一版（见下）。
+
+#### 只保留最新版 Release
+
+两个仓库都遵循同一条策略：**Releases 页永远只有刚发布的这一版**。这是有意为之，不是清理
+遗留 —— 用户要的是「点进 Releases 就是最新版」，旧版本留在列表里只会让人下错。
+
+- **tag 一律保留**。删的只是 GitHub 上的 Release 记录（标题、说明、asset）；`v1.0`…
+  `v1.4` 这些 git tag 原样不动，历史源码快照仍然能 `git checkout v1.3` 检出。
+- 两个脚本都在**最后一步**做清理（asset 已上传、发布已经成功之后），所以清理失败绝不会
+  影响这次发布；失败时脚本会以非零退出告诉你，但版本已经发出去了。
+- **draft 不删**：`Remove-StaleReleases` 的过滤条件是
+  `$_.id -ne $KeepId -and -not $_.draft`，没发布的草稿留着。
+- 需要留旧版时加 `-KeepOldReleases`（两个脚本都有这个开关）。
+- **后果：旧版本的 changelog 也随之消失**。Release body 不是版本库里的文件，删了 Release
+  就没有第二份副本。所以 `-NotesFile` 指向的笔记**是入库的**：`release-notes-<version>.md`
+  放在仓库根，和脚本并排。现存 `release-notes-1.1.md` / `release-notes-1.3.md` /
+  `release-notes-1.4.md` 三份（1.1 与 1.3 的 Release 已被清理删除，正文只剩这里这一份；
+  它们原先只在被忽略的 `work\notes-*.md` 里）。**发新版时把笔记写成
+  `release-notes-<version>.md` 再入库**，否则「只留最新版」等于把历史更新说明一起丢掉 ——
+  而 tag 只记录源码，不记录说明。
+
+**容易误判的一点**：删掉 Release 之后，`/releases/tag/v1.3` 这类地址**仍然返回 HTTP 200**
+（它退化成纯 tag 页）。判据不是状态码，而是：页面 `<title>` 从 `Release HyperDuo 1.3`
+变成 `Release v1.3`，且**页面上不再有 `HyperDuo-*.apk` asset 链接**；`/releases` 列表页只剩
+一条 `/releases/tag/` 链接。
 
 `.tools\debug.keystore` **是入库的**（`.gitignore` 显式放行），所以发布不需要任何 secret，
 产出的 APK 与本地 debug 包、与应用内更新互相覆盖。
@@ -1690,3 +1720,33 @@ SystemUI 进程会跑到它。它把真实的 `app\src\main\java\io\github\yixin
 - **模块页已收录（description 手填后约 23 分钟）**：`https://modules.lsposed.org/module/io.github.yixing233.hyperduo/` 在 **14:14:43** 由 404 转为 **200**（后台轮询 60 s 一次，`?cb=`/`Cache-Control: no-cache` 都不能提前穿透缓存，只有上游重新构建才生效；description 手填时刻约 05:51:27Z，即上游站点约 23 分钟后才重建）。**判据不能只看详情页 404**：同一时刻站点首页 `https://modules.lsposed.org/` 的 `astro-island` props 里已经出现本模块（`"name":"io.github.yixing233.hyperduo"`、`description` 为手填的那串、`url` 指模块仓，列表行 `<h2>` 显示手填 description、`Website` 指主仓、`Source` 指模块仓、`<time dateTime="2026-10-03T05:58:49Z">`），所以**「首页已列出、详情页还 404」是重建过程中的中间态**，等待期间不要据此判定失败。
 - 收录后的详情页（36628 B）核验：`<title>` = `HyperDuo · 仿 iPhone Duo 三合一状态栏图标 · Xposed Module Repository`；README 的三个 `<img>` 全部渲染出来，`data-canonical-src` 仍是我们的 jsDelivr 地址（`statusbar.png` width 900 / `states.png` width 820 / `settings.png` width 420）；下载链接是 `download/10400-1.4/HyperDuo-1.4.apk?sign=…`，即模块仓那个 release。
 - 工具坑：详情页直连偶发 `000`（curl 超时/连接失败），**必须 `curl.exe -sL` 跟随重定向并加重试**，否则会把网络抖动误判成 404（无斜杠的 `.../hyperduo` 返回 `308`，`-L` 才能跟到 200）。
+- **「只保留最新版 Release」落地（1.4 之后）**：两个脚本各加一个 `Remove-StaleReleases`
+  函数（`GET releases?per_page=100` → 过滤 `$_.id -ne $KeepId -and -not $_.draft` → 逐个
+  `DELETE /releases/$id`）和 `-KeepOldReleases` 开关，都在**上传 asset 之后**才调用。
+  主仓提交 `f90046e`（`release.ps1`，`1 file changed, 39 insertions(+), 1 deletion(-)`）；
+  模块仓脚本见下条。**执行前先验证可恢复性**：把 4 个远端 asset 全部下载回来与 `dist\` 同名
+  文件逐个比 SHA256，得到 `v1.4 3067544 B` / `v1.3 3038276 B` / `v1.1 3038076 B` /
+  `v1.0 2560743 B` **四个 `identical=True`**，确认字节完全一致后才 `DELETE` 掉
+  `v1.3`/`v1.1`/`v1.0`（保留 `v1.4`）。清理后 `git ls-remote --tags origin` 仍是八个 ref
+  （四个 tag 各有 annotated + peeled 两条），`GET /repos/yixing233/HyperDuo/releases/latest`
+  → `tag=v1.4`、asset `HyperDuo-1.4.apk` 3067544 B，**应用内更新器不受影响**。
+- **模块仓发布脚本已从 `.tmp\modrepo\release-module.ps1` 移到仓库根 `release-module.ps1`**：
+  它原先落在 `.gitignore` 的 `/.tmp/` 里，而 `docs/DEVELOPMENT.md` 却在引用它 ——「每次发布
+  都这样」的策略放在被忽略的目录里等于不可复现。现在它与 `release.ps1` 并排入库。**该文件
+  刻意保持 ASCII-only 且无 BOM**（`nonASCII=0`、7702 B），所以 PS 5.1 按 ANSI 读也无害；
+  文件头注释已写明这条约束，**不要往里面加中文**。验证：`& .\release-module.ps1 -Version 1.4
+  -VersionCode 10400 -Apk .\dist\HyperDuo-1.4.apk -DryRun` → 版本三者全对、`exit 0`。
+- **包名更换（`a98053f`）曾把两个脚本的 UTF-8 BOM 弄丢，造成真实回归**：`release.ps1` 在
+  `bcb7f9b`/`0cc4d5b`/`03b36b5` 三个历史版本里都是 `BOM=True (239,187,191)`，到 `a98053f`
+  变成 `BOM=False (35,32,230)`；`install.ps1` 在 `41ef355` 是 `BOM=True`、`a98053f` 也丢了。
+  后果：本机 `[Parser]::ParseFile` 读 `release.ps1` 报 **9 个 parse error**（`line 11: Missing
+  expression after ','`、`line 44/55: Unexpected token …`），即**文档里的调用方式
+  `.\release.ps1` 当时根本跑不起来**；`install.ps1` 则 parse errors 为 0 但运行时打印乱码
+  （正是 §「教训（PowerShell 5.1 与 BOM）」记过的那个陷阱）。修复见提交 `39c4b45`
+  （`2 files changed, 2 insertions(+), 2 deletions(-)`，每文件仅第 1 行 1 增 1 删）。
+  **回归测法**：`ParseFile` 数 errors + 用 `[System.IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)`
+  核对中文是否正常，两条都要做。**教训：凡是"改包名/批量替换"式的全局改写，收尾必须复验
+  BOM 与行尾**，因为这类改写常顺手重写整个文件。
+- **`.gitattributes` 已经规定 `*.ps1 text eol=crlf`，且仓库 `core.autocrlf=false`**，所以
+  `git add` 时出现的 `warning: in the working copy of '...', LF will be replaced by CRLF`
+  是**无害的**（索引里存的仍是 LF，工作树保持 LF）。不要为了消掉这个警告去改脚本行尾。
