@@ -18,13 +18,16 @@
 #   .\release-module.ps1 -Version 1.4 -VersionCode 10400 `
 #       -Apk .\dist\HyperDuo-1.4.apk -NotesFile .\release-notes-1.4.md
 #   .\release-module.ps1 ... -DryRun     # validate badging only, create nothing
+#   .\release-module.ps1 ... -SkipReadme # do not touch the module repo README
 #
 # After a successful publish this deletes every other release in the module repo,
 # so the repo always shows exactly one version -- the same "only the newest
 # release" policy release.ps1 applies to the main repo. Tags are left alone.
 #
-# The module repo's README.md / SUMMARY are NOT touched here: they go through
-# PUT /contents by hand (see docs/DEVELOPMENT.md).
+# The module repo's README.md IS published from .\module-README.md (tracked in
+# this repo) so the published copy cannot drift away from the source. Pass
+# -SkipReadme to leave it alone. SUMMARY is NOT touched here: it has no tracked
+# source and goes through PUT /contents by hand (see docs/DEVELOPMENT.md).
 #
 # ASCII only, and NO BOM: this file has no Chinese, and PowerShell 5.1 reads a
 # BOM-less .ps1 with the ANSI code page. Keep every byte < 0x80 so that is safe.
@@ -38,7 +41,8 @@ param(
     [string]$NotesFile,
     [switch]$DryRun,
     [switch]$Force,
-    [switch]$KeepOldReleases
+    [switch]$KeepOldReleases,
+    [switch]$SkipReadme
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,6 +53,7 @@ $Module  = 'Xposed-Modules-Repo/io.github.yixing233.hyperduo'
 $Package = 'io.github.yixing233.hyperduo'
 $Tag     = "$VersionCode-$Version"
 $Asset   = "HyperDuo-$Version.apk"
+$Readme  = Join-Path $Root 'module-README.md'
 
 $Aapt = Join-Path $Tools 'sdk\build-tools\37.0.0\aapt2.exe'
 
@@ -182,6 +187,39 @@ $uploaded = Invoke-RestMethod -Method Post `
 
 Write-Host "==> uploaded $($uploaded.name)  $($uploaded.size) B" -ForegroundColor Green
 Write-Host "==> $($uploaded.browser_download_url)" -ForegroundColor Green
+
+# ---- readme ------------------------------------------------------------------
+
+# module-README.md is the tracked source of the module repo's front page. If the
+# published copy already matches, say so and do not create an empty commit.
+if ($SkipReadme) {
+    Write-Host '==> -SkipReadme: leaving the module repo README.md alone' -ForegroundColor Yellow
+} elseif (-not (Test-Path $Readme)) {
+    Write-Host "==> $Readme not found: skipping README.md" -ForegroundColor Yellow
+} else {
+    $want = [System.IO.File]::ReadAllText($Readme, [Text.Encoding]::UTF8)
+    $cur = $null
+    try { $cur = Invoke-RestMethod -Uri "$api/contents/README.md" -Headers $headers } catch {
+        $status = $null
+        try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = $null }
+        if ($status -ne 404) { throw }
+    }
+    $have = ''
+    if ($cur) { $have = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($cur.content -replace '\s', ''))) }
+
+    if ($cur -and $have -ceq $want) {
+        Write-Host '==> README.md already up to date' -ForegroundColor DarkGray
+    } else {
+        $body = @{
+            message = "docs: sync README for $Version"
+            content = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($want))
+        }
+        if ($cur) { $body.sha = $cur.sha }
+        $put = Invoke-RestMethod -Method Put -Uri "$api/contents/README.md" -Headers $headers `
+            -ContentType 'application/json' -Body ($body | ConvertTo-Json -Compress)
+        Write-Host "==> README.md published  $($put.content.size) B  sha=$($put.content.sha.Substring(0,10))" -ForegroundColor Green
+    }
+}
 
 # Run last, so a cleanup failure can never undo a successful publish.
 if ($KeepOldReleases) {
