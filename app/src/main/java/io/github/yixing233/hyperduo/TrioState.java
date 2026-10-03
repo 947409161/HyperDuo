@@ -137,6 +137,17 @@ final class TrioState {
     int lightColor;
     int darkColor;
     float darkIntensity;
+    /**
+     * Ink last handed to the out-of-ring views under this host, or {@code 0}
+     * before the first hand-over.
+     *
+     * <p>Kept per host rather than in one static: the status bar and the
+     * control centre each own a battery container, and the ink is the same for
+     * both, so a shared cell would let whichever drew first swallow the change
+     * for the other. {@link #foreground()} never returns {@code 0} - it
+     * substitutes a default - so the first comparison always fires.
+     */
+    int outRingInk;
 
     // Signal levels (shared).
     int wifiLevel = -1;

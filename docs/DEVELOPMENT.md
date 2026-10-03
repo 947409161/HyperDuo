@@ -702,6 +702,38 @@ style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会
 采样只认权威状态栏容器（`isStatusBarContainer`：等于捕获到的 `mStatusBarStatusIcons`，或祖先
 类名为 `MiuiPhoneStatusBarView`），否则控制中心/QS 头部的容器会污染全局状态。
 
+#### 环外视图的前景色（深浅色跟随）
+
+环外两个自建视图（`OutTypeLabel`、`OutSignalView`）的前景色都取自 `TrioState.foreground()`，
+但**没有任何东西会在深浅色变化时重绘它们** —— 这是「字体颜色跟随状态栏变色的逻辑更新不及时」
+的成因。机制（jadx 取证）：MIUI 的深浅色流程是
+`MiuiBatteryMeterView.updateLightDarkTint(...)`（`MiuiBatteryMeterView.java:1176-1204`）→
+`:1189 miuiBatteryMeterIconView.onDarkChangeInternal()` → 非 legacy 的两条路径都汇到
+`MiuiBatteryMeterIconView.java:504 updateProgressBackgroundBitmap(); L505 invalidate();`。
+即**深浅色变化必然 invalidate 电池图标视图**（也就必然重跑 `hyperduo-draw`），但它只给自己的
+子树重新着色。两个环外视图挂在 `MiuiStatusBatteryContainer` 里、是 glyph host 的**兄弟**，
+不在那条链上：`MiuiStatusBatteryContainer` 完全没有 tint 处理，而 `settle()` 里的
+`refreshOutTypeLabel` 又被 `onLayout` 门禁卡住（文本/字号/内边距都已相符时不动作）。
+
+修法在 `TrioHooks.recolourOutRing(TrioState state, int ink)`：`hyperduo-draw` 钩子在
+`state.refresh()` 之后把本帧的 `state.foreground()` 与 `TrioState.outRingInk` 比较，
+**只在不等的那一帧**记账并 post 一次重着色 —— 给标签 `setTextColor(ink)`，给读数
+`invalidate()`（它的 `onDraw` 本就每帧现读颜色，缺的只是「被要求画」）。两条细节：
+
+- **账记在 `TrioState` 的实例字段上，不是静态字段**：状态栏与控制中心各有一个电池容器，
+  前景色对两者相同，共享一个静态格会让先画的那个把变化吞掉，后画的永远停在旧色。
+- **先记账再 post**：颜色抖动时不能每帧排一个 runnable；而且记下的正是本帧画出去的值，
+  两边不会对不上。`foreground()` 在 `0` 时替换成默认值，所以初值 `0` 必然触发第一次比较。
+
+`OutSignalView.onDraw` 里原先的注释「the row is invalidated when the tint changes」正是这个
+bug 的信念来源，已改正。
+
+`TrioHooks` 需要 Xposed API，桌面上编不了，所以这条规则和该文件里其它几条一样，靠
+`work\outringcheck\verify.ps1` 的**源码钉子**守着：只在不等的帧记账、先记账再 post、标签拿到新墨色、
+读数被要求重绘，四条成对断言，外加「错误注释不得复活」与「`outRingInk` 必须是实例字段且
+`foreground()` 仍把 0 折成 `DEFAULT_FOREGROUND`」两条形状断言。**唯一无法离线替代的是真机那一下**
+—— 改深浅色时环外文字是否立刻跟上。
+
 ### 双卡信号
 
 「双卡信号」（`dual_sim_signal`）在**无 Wi-Fi 且未充电**时把一排点换成上下两排：**上排 = 卡一
@@ -824,10 +856,16 @@ int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `
 `data_sim_only` 打开时只取上网卡：`dataSlot` 命中哪张就取哪张，`dataSlot` 未知（`-1`）或那张卡
 没有读数时退回第一张有读数的卡，绝不退化成两张。
 
-**高度与尺寸**：视图高度是 `TrioRenderer.outSignalHeight(anchor.getHeight(),
-outSignalSize)` —— 锚点（电池图标盒）高度乘上用户设置的百分比（`out_signal_size`，100 = 与图标
-同高），再把结果交给 `outSignalWidth(height)` 按参考图纵横比求宽。**两个函数的参照框永远是
-`STACK_INK_H`（209）**，与有没有点行无关。
+**高度与尺寸**：视图高度是 `TrioRenderer.outSignalHeight(sizeDp, density)` —— 用户设置的 dp
+（`out_signal_size_dp`，默认 15）乘上显示器密度，**与那一行多高没有任何关系**，再把结果交给
+`outSignalWidth(height)` 按参考图纵横比求宽。**两个函数的参照框永远是 `STACK_INK_H`（209）**，
+与有没有点行无关。
+
+**旧形式为什么被换掉（bug (g)）**：高度原先是 `outSignalHeight(anchor.getHeight(), outSignalSize)`，
+即电池图标盒**活高度**的百分比。MIUI 把这一行在收起时排成 88px、拉开控制中心后变成 134px
+（就是系统 `statusBars` inset 的高度，`dumpsys window displays` 实测），于是读数跟着放大
+`134/88 ≈ 1.52` 倍 —— 用户报的「下拉到控制中心后这个信号还会莫名其妙的放大」正是它。dp 免疫：
+密度不变，下拉多少都画一样大。
 
 **这里修掉过一个尺寸异常**：原先 `outSignalWidth(height, dots)` 的分母随 `dots` 在
 `STACK_INK_H`(209) 与 `STACK_BAR_H[3]`(150) 之间切换，而 `drawOutSignal` 里的
@@ -837,9 +875,11 @@ outSignalSize)` —— 锚点（电池图标盒）高度乘上用户设置的百
 `outSignalInkH(dots)` 降级为「居中用的墨高」，不再参与比例。`work/outringcheck` 的 `squat` 反例
 把这两行同时改回旧写法，探针必须挂掉 —— 单独改一处是**看不见的**，这正是这个 bug 能活下来的原因。
 
-**改尺寸要不要重测**：`TrioHooks.outSignalHeight(View anchor)` 是唯一的换算入口，
+**改尺寸要不要重测**：`TrioHooks.outSignalHeight(View host)` 是唯一的换算入口，
 `updateOutSignal` 的 `measure(...)` 与 `refreshOutSignal` 的变更比较都用它，滑杆改值与重新测量
-不可能对目标高度各执一词；比较式因此是 `view.getMeasuredHeight() != outSignalHeight(anchor)`。
+不可能对目标高度各执一词；比较式因此是 `view.getMeasuredHeight() != outSignalHeight(host)`。
+它**只从视图取密度**（`host.getResources().getDisplayMetrics().density`），视图的测量高度**故意
+不取** —— 取了就等于把 bug (g) 请回来。
 
 宿主尚未测量（`inkScale <= 0`）时跳过挂载，下一次 posted sync 自愈。
 
@@ -910,7 +950,7 @@ meter)`：有信号就贴在信号外侧，否则直接贴电池盒 —— 阅�
 | `value_weight` | `700` | 100 – 900 |
 | `type_size` | `32` | 16 – 44（只用于环内） |
 | `out_type_size` | `32` | 16 – 64（只用于环外；上界高于 `type_size`，见 `Prefs.java` 的说明） |
-| `out_signal_size` | `100` | 50 – 200（环外信号读数的百分比；100 = 与状态栏图标同高，只用于环外 + 堆叠信号） |
+| `out_signal_size_dp` | `15` | 6 – 20（环外信号读数的 dp 高度；乘显示器密度成像素，**不跟随电池容器高度**，只用于环外 + 堆叠信号） |
 | `type_weight` | `700` | 100 – 900（环内/环外共用） |
 | `track_alpha` | `56` | 0 – 255 |
 | `debug_log` | `false` | — |
@@ -1042,8 +1082,8 @@ Wi-Fi 墨迹 / 充电 / 只读到一张卡 / 一张都没读到 / 开关关 / �
   上网卡沉默时退回另一张已应答的卡等 11 组）。
 - `geometry()` 查参考图比例式（列数、柱高严格递增、`STACK_INK_W/H` 与 `STACK_BAR_H[3]+gap+D` 的关系），
   并查**盒子始终按 `STACK_INK_H` 定比例**：`outSignalWidth(h)` 与 `h*STACK_INK_W/STACK_INK_H` 相等、
-  高度为 0 时宽度为 0，以及 `outSignalHeight` 的百分比语义（100 不变、50 折半、200 加倍、下限仍留
-  1 px、0 行/0% 都为 0）。
+  高度为 0 时宽度为 0，以及 `outSignalHeight` 的 dp 语义（`15dp × density` 就是像素高、密度越大
+  像素越多、非正 dp 或非正密度得 0、下限仍留 1 px）。
 - `pixels()` 在真实画布上验柱底共线、最高柱在最右、未点亮列既不透明也不与点亮列同色、点行在柱底下方，
   以及**同一行上有无点行的最高柱一样高**（尺寸异常的回归断言）。
 
@@ -1053,7 +1093,12 @@ Wi-Fi 墨迹 / 充电 / 只读到一张卡 / 一张都没读到 / 开关关 / �
 （只改一处是看不见的 —— 两处互相印证，正是尺寸异常能长期存活的原因）。`fixed` 必须 `exit 0`，
 三条反例必须 `exit 1`（实测分别 3 条、14 条、3 条不符；`squat` 实测最高柱 51 vs 72 px，即 1.39 倍本身）。
 脚本开头有一道**源码钉**：`TrioHooks.java` 里若已不存在 `if (a.foldsMobile())` 就直接 `throw`——
-否则探针会变成在测一条没人调用的规则。
+否则探针会变成在测一条没人调用的规则。同一段还有**环外前景色跟随深浅色**那一批钉子（`TrioHooks`
+桌面上编不了，只能钉源码）：只在不等的帧记账、先记账再 post、标签 `setTextColor(ink)`、读数
+`signal.invalidate()`，四条成对断言，外加两条形状断言 —— `OutSignalView.onDraw` 上那句
+「the row is invalidated when the tint changes」的错误注释不得复活，`TrioState.outRingInk` 必须是
+实例字段（`static` 即报错）而 `foreground()` 必须仍把 `0` 折成 `DEFAULT_FOREGROUND`（否则初值
+`0` 会与首帧读数相等，第一次着色被当成「没变」而跳过）。七种回归形态都实测能把钉子碰响。
 
 **为什么尺寸断言不能自己算取样列**：`squat` 第一次跑出来是「51 vs 0 px」，因为探针用**正确**的公式
 去算最高柱的横坐标，而那个构建的几何恰恰是错的，取样列整个落在柱外，量到的是空画布。断言「两边一样大」
@@ -1705,7 +1750,35 @@ SystemUI 进程会跑到它。它把真实的 `app\src\main\java\io\github\yixin
   （`--offline`）`BUILD SUCCESSFUL in 28s`。
   **探针自身的一条教训**：尺寸断言最初用**正确公式**去算取样列，而 `squat` 构建的几何恰恰是错的，
   取样点整个落在柱外，量到空画布（`51 vs 0 px`）—— 断言「两边一样大」时取样点必须与几何无关
-  （改取全画布最长的亮柱 `tallestRun`），否则一条本意抓尺寸错的断言会退化成在抓「那里没东西」。
+  （改取全画布最长的亮柱 `tallestRun`），否则一条本意抓尺寸错的断言退化成在抓「那里没东西」。
+  **其中「int 百分比」这一段已被后一轮取代**（见下条「第十一轮补」：单位改为 dp，键值也随
+  字符串字面量改为 `out_signal_size_dp`）；本条其余事实（尺寸异常的真身、参照框只留 209、
+  行内四构建与探针教训）仍然成立，未受那一次改动影响。
+
+- **「环外信号大小」由百分比改为 dp（第十一轮补）**：用户报「而且下拉到控制中心后这个信号还会
+  莫名其妙的放大,需要修复」。**机制**：旧值 `out_signal_size` 是电池容器**活高度**的百分比，
+  而 MIUI 把那行在收起时常驻 88px、拉开控制中心后变成 134px（就是系统 `statusBars` inset 的
+  高度，`dumpsys window displays` 实测），读数于是按 `134/88 ≈ 1.52` 倍跟着长 —— 这不是绘制
+  错，是参照系本身会变。**修法**：单位换成 dp，`TrioRenderer.outSignalHeight` 的签名由
+  `(int anchorHeight, int percent)` 改为 `(int sizeDp, float density)`，体是
+  `if (sizeDp <= 0 || density <= 0f) return 0; return Math.max(1, Math.round(sizeDp * density));`
+  —— 与那一行多高彻底无关。`TrioHooks.outSignalHeight(View host)` 只从视图取
+  `getResources().getDisplayMetrics().density`，视图的测量高度**故意不取**（取了就等于把这个
+  bug 请回来），两个调用点（变更检查 `view.getMeasuredHeight() != outSignalHeight(host)` 与
+  `updateOutSignal` 里的 `final int height = outSignalHeight(host);`）都传 `host`；
+  `TrioPreviewView` 自己从 display 取密度再调 `outSignalHeight(a.outSignalSize, density)`。
+  **键与取值**：`Prefs.KEY_OUT_SIGNAL_SIZE` 这个常量名不变，只有它的字符串字面量从
+  `out_signal_size` 改成 `out_signal_size_dp`；`DEF_OUT_SIGNAL_SIZE` `100 → 15`、
+  `MIN_OUT_SIGNAL_SIZE` `50 → 6`、`MAX_OUT_SIGNAL_SIZE` `200 → 20`（`IntSlider` 读同一对常量，
+  所以 `TrioSettings` / `TrioAppearance` / `SettingsRepository.kt` / `SettingsScreen.kt` 一行没动）。
+  **不欠迁移**：那个旧键值从未随任何一次发布出货，框架也不做类型转换。`outSignalWidth(int height)`
+  与 `outSignalInkH(boolean dots)`、`drawOutSignal` 里 `scale = Math.min(width / inkW, height /
+  TrioGeometry.STACK_INK_H)` 都**未改**，`TrioPreviewView.HOST_ICON_HEIGHT_DP = 20f` 仍由
+  `drawOutTypeLabel` 用着、没有删。**15dp 是实测来的**：测试机（小米 houji / Redmi K70，
+  1200×2670，`Physical density: 480` 即 density 3）上 MIUI 自己那四条信号柱墨高 44px，
+  `15 × 3 = 45` 正好同高；`6..20dp` 在同密度下是 18..60px，下界是四根柱仍分得清的最小值、
+  上界是状态栏那一行在开始挤动邻居图标之前能容下的最大值。文案 `out_signal_size_summary`
+  （`values` / `values-en` 两份）同步改写为 dp 说明。
 
 - **1.4 发布（含包名更换 + 双卡/环外/按 MIUI 电平取格）**：第一次用「先提交干净、再跑 release.ps1」的流程走通（`release.ps1` 构建工作树但给 `HEAD` 打 tag，所以必须工作树干净）。提交 `a98053f` `release: 1.4, rename the package to io.github.yixing233.hyperduo`（30 files、4464 insertions / 1103 deletions）先 `git push origin main`（`release.ps1` 只推 tag、**不推分支**，必须单独推一次），再 `release.ps1 -Version 1.4 -NotesFile .tmp\modrepo\notes-1.4.md` → `exit 0`、`BUILD SUCCESSFUL in 14s`。tag `v1.4` 是指向提交 `a98053f68ffe076574053ae17ffdfda0fbe30cf9` 的 **annotated tag**（tag 对象 `058f6f54229c9807004cd7fecf9555dcdccee61a`，`git rev-parse "v1.4^{commit}"` 与 `HEAD` 一致；注意在 PowerShell 里 `^{commit}` 必须加引号，否则 `^{…}` 被当转义吃掉）。Release `HyperDuo 1.4` 非 draft / 非 prerelease（`published=2026-10-03T05:40:25Z`），asset `HyperDuo-1.4.apk` **3067544 B**。**发布产物按字节复核**：从 `https://github.com/yixing233/HyperDuo/releases/download/v1.4/HyperDuo-1.4.apk` 下载回来 SHA256 **`0B95AF03D704C3F52C7B015023F67EA3217C22299CD1AECDBB6ABC07D65BE527`** 与本地 `dist\HyperDuo-1.4.apk` 逐字相同。
 - **1.4 发布产物的离线核对**（无设备，上机验证仍缺）：`aapt2 dump badging` → `package: name='io.github.yixing233.hyperduo' versionCode='10400' versionName='1.4'`、targetSdk 36、ABI 四套；`apksigner verify --print-certs` → v2 方案 `true`、证书 `CN=HyperDuo, O=HyperDuo, C=CN`、SHA-256 `b4e3a12d…8c41f`（与设备上原装 APK 同一证书，所以除改名那一次外，同包名的后续版本仍可 `-r` 覆盖）。
@@ -1750,3 +1823,18 @@ SystemUI 进程会跑到它。它把真实的 `app\src\main\java\io\github\yixin
 - **`.gitattributes` 已经规定 `*.ps1 text eol=crlf`，且仓库 `core.autocrlf=false`**，所以
   `git add` 时出现的 `warning: in the working copy of '...', LF will be replaced by CRLF`
   是**无害的**（索引里存的仍是 LF，工作树保持 LF）。不要为了消掉这个警告去改脚本行尾。
+- **环外视图前景色跟随深浅色（第十二轮补）**：用户报「自行绘制的环外信号类型，像 5G 的字体颜色，
+  似乎有跟随状态栏文本变色的逻辑……但是它的更新不是很及时」。根因与修法见「实时刷新」下的
+  「环外视图的前景色（深浅色跟随）」一节：`hyperduo-draw` 钩子比较
+  `state.foreground()` 与 `TrioState.outRingInk`，只在不等的帧记账并 post 一次
+  `recolourOutRing`。**这一条只有真机能验**（改深浅色的那一下是否立刻跟上），当前设备离线，
+  上机验证仍缺；离线侧只保证编译不回归、五条工装（`gapcheck` / `slotcheck` / `dualsimcheck` /
+  `simcheck` / `outringcheck`）全部维持原判，外加出图工装 26 格照常渲染。
+  `TrioHooks` 需要 Xposed API、桌面上编不了，所以这条规则像该文件里其它几条一样，改成在
+  `work\outringcheck\verify.ps1` 里加**源码钉子**：四条成对断言（只在不等的帧记账 / 先记账再 post /
+  标签拿到新墨色 / 读数被要求重绘），外加两条形状断言（`OutSignalView.onDraw` 上那句「tint 变化会
+  让它失效」的错误注释不得复活；`outRingInk` 必须是实例字段，而 `foreground()` 必须仍把 0 折成
+  `DEFAULT_FOREGROUND`，否则首帧会被当成「没变」而跳过）。七种回归形态各自实测都能把钉子碰响。
+  另一条能离线做的判据是**产物核对**：`app\build\outputs\apk\release\app-release.apk` 的
+  `classes.dex` 同时含 `recolourOutRing` 与 `outRingInk`（debug 包在 `classes3.dex`），
+  证明改动确实进了产物而不是被增量构建漏掉。

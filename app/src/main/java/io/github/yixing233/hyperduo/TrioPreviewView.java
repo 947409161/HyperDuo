@@ -251,8 +251,8 @@ public final class TrioPreviewView extends View {
      * point of the cell - one row instead of two.
      */
     private void drawOutSignal(Canvas canvas, int innerW, int innerH) {
-        final float hostHeight = HOST_ICON_HEIGHT_DP * getResources().getDisplayMetrics().density;
-        if (hostHeight <= 0f) {
+        final float density = getResources().getDisplayMetrics().density;
+        if (density <= 0f) {
             return;
         }
 
@@ -262,13 +262,17 @@ public final class TrioPreviewView extends View {
         if (reading[0] < 0) {
             reading[0] = 0;
         }
-        final boolean dotRow = reading[1] >= 0;
 
-        final int hostWidth = TrioRenderer.outSignalWidth(Math.round(hostHeight), dotRow);
+        // Same two steps the status bar takes: the setting, in dp, resolved
+        // against the density, then the reference aspect. The setting is not a
+        // ratio of the icon box here any more than it is on the status bar, so
+        // a smaller reading really does show up smaller in this cell.
+        final int hostHeight = TrioRenderer.outSignalHeight(a.outSignalSize, density);
+        final int hostWidth = TrioRenderer.outSignalWidth(hostHeight);
         if (hostWidth <= 0) {
             return;
         }
-        final float scale = Math.min(innerW / (float) hostWidth, innerH / hostHeight);
+        final float scale = Math.min(innerW / (float) hostWidth, innerH / (float) hostHeight);
         final int drawW = Math.max(1, Math.round(hostWidth * scale));
         final int drawH = Math.max(1, Math.round(hostHeight * scale));
 

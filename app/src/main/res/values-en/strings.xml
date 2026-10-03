@@ -54,6 +54,9 @@
     <string name="data_sim_only_title">Data SIM only</string>
     <string name="data_sim_only_summary">With two SIMs, draw only the reading of the SIM that carries data and leave the other one out. A single SIM, or one whose data SIM cannot be read, is unaffected.</string>
 
+    <string name="out_signal_size_title">Out-of-ring signal size</string>
+    <string name="out_signal_size_summary">Overall height of the out-of-ring reading, in dp, so it converts itself to pixels on any screen density. 15dp is the same height as the status bar\'s own signal icon, and is the default; the slider covers 6–20dp. The same row is drawn at the same size whether or not the dot row follows it, so the two shapes never come out different sizes, and pulling the control centre down does not change it.</string>
+
     <string name="value_centre_title">Centre the percentage</string>
     <string name="value_centre_summary">Enlarge the percentage into the middle of the ring and always keep it there. The Wi-Fi arcs shrink into the top notch, a smaller bolt takes the notch while charging (the arcs are then dropped), and an in-ring network type moves into the notch too.</string>
 

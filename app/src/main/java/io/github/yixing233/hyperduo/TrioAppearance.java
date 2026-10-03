@@ -95,6 +95,7 @@ public final class TrioAppearance {
     public final int valueWeight;
     public final int typeSize;
     public final int outTypeSize;
+    public final int outSignalSize;
     public final int typeWeight;
 
     private TrioAppearance(TrioSettings c) {
@@ -132,6 +133,7 @@ public final class TrioAppearance {
         valueWeight = c.valueWeight;
         typeSize = c.typeSize;
         outTypeSize = c.outTypeSize;
+        outSignalSize = c.outSignalSize;
         typeWeight = c.typeWeight;
     }
 

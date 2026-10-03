@@ -179,6 +179,27 @@ public final class Prefs {
      * every key has exactly one type for the whole lifetime of the module.
      */
     public static final String KEY_OUT_TYPE_SIZE = "out_type_size";
+    /**
+     * The stacked out-of-ring signal's height, in density pixels.
+     *
+     * <p>A dp rather than a percentage of anything, because the row this reading
+     * stands in does not keep one height. At rest the battery container measures
+     * one way, and the moment the control centre is pulled down MIUI lays the
+     * same container out through the whole {@code statusBars} inset instead - on
+     * the test device 88px becomes 134px, so a reading sized as a share of its
+     * row grew by half just because a shade was opened. A dp is resolved against
+     * the display's density and never against whoever is laying the row out.
+     *
+     * <p>Named {@code _dp} rather than reusing the shorter key a percentage once
+     * used: the unit changed, and an install that still holds a percentage in the
+     * old key would have it read as a dp. Nothing shipped with that key, so no
+     * migration is owed and the old name is simply retired.
+     *
+     * <p>An {@code int}, like {@link #KEY_OUT_TYPE_SIZE}: the framework does no
+     * type conversion, so every key has exactly one type for the whole lifetime
+     * of the module.
+     */
+    public static final String KEY_OUT_SIGNAL_SIZE = "out_signal_size_dp";
     public static final String KEY_TYPE_WEIGHT = "type_weight";
     public static final String KEY_TRACK_ALPHA = "track_alpha";
 
@@ -297,6 +318,15 @@ public final class Prefs {
      * never touches the new slider keeps exactly the look they had.
      */
     public static final int DEF_OUT_TYPE_SIZE = 32;
+    /**
+     * The stacked out-of-ring signal's height, in density pixels.
+     *
+     * <p>15dp: MIUI's own four signal bars measure 44px on the test device at
+     * density 3, and 15dp is 45px there - the reading ships at the size of the
+     * native icon it replaces. Being a dp, it lands on the same physical size on
+     * any density instead of only matching on this one.
+     */
+    public static final int DEF_OUT_SIGNAL_SIZE = 15;
     public static final int DEF_TYPE_WEIGHT = 700;
     public static final int DEF_TRACK_ALPHA = 56;
 
@@ -320,6 +350,19 @@ public final class Prefs {
      * so it needs headroom the in-ring label does not.
      */
     public static final int MAX_OUT_TYPE_SIZE = 64;
+    /**
+     * The physical span the slider offers, in density pixels: 6dp (18px at
+     * density 3) is where the four bars stop being distinguishable, and 20dp
+     * (60px) is the tallest the status bar row shows before the reading starts
+     * pushing the icons around it.
+     *
+     * <p>Narrow on purpose. The point of the setting is to match or gently
+     * nudge MIUI's own signal bars, which measure 44px - about 14.7dp - so the
+     * shipped 15dp sits in the middle of the range and a quarter of the slider
+     * either way is already a visible change.
+     */
+    public static final int MIN_OUT_SIGNAL_SIZE = 6;
+    public static final int MAX_OUT_SIGNAL_SIZE = 20;
     public static final int MIN_TYPE_WEIGHT = 100;
     public static final int MAX_TYPE_WEIGHT = 900;
     public static final int MIN_TRACK_ALPHA = 0;

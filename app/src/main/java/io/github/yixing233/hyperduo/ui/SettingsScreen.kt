@@ -961,6 +961,37 @@ private fun LazyListScope.geometryTab(
                     onValueChange = { v -> update { it.setOutTypeSize(v) } },
                 )
             }
+            // The size of the out-of-ring reading itself. It is authored against
+            // neither design space and against no view either: the setting is a
+            // plain dp, resolved against the display's density, so it is the same
+            // reading whatever the status bar row happens to be doing - MIUI
+            // lays that row out 88px tall at rest and 134px with the control
+            // centre pulled down, and a share of either would drift with it.
+            //
+            // Gated on the switches the reading needs, named individually so the
+            // hint points at a row the user can act on. The knob itself is
+            // {@code a.stackedOut()} - the rule that decides there is a reading to
+            // size - rather than a second copy of the same three conditions.
+            val outSignalSizeHint = gateHint(
+                a.glyph to R.string.master_title,
+                a.mobile to R.string.show_mobile_title,
+                a.signalOutOfRing to R.string.signal_mode_title,
+                a.stackedSignal to R.string.stacked_signal_title,
+            )
+            TooltipBox(
+                text = outSignalSizeHint.orEmpty(),
+                enabled = outSignalSizeHint != null,
+            ) {
+                IntSlider(
+                    value = settings.outSignalSize,
+                    min = Prefs.MIN_OUT_SIGNAL_SIZE,
+                    max = Prefs.MAX_OUT_SIGNAL_SIZE,
+                    title = stringResource(R.string.out_signal_size_title),
+                    summary = stringResource(R.string.out_signal_size_summary),
+                    enabled = a.stackedOut(),
+                    onValueChange = { v -> update { it.setOutSignalSize(v) } },
+                )
+            }
             // The weight still applies in both positions.
             val typeWeightHint = gateHint(
                 a.glyph to R.string.master_title,

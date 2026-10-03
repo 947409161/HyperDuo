@@ -110,6 +110,14 @@ public final class TrioSettings {
      * tuned separately.
      */
     public int outTypeSize;
+    /**
+     * Height of the stacked out-of-ring signal, in dp, resolved against the
+     * display's density. A field of its own rather than a reuse of
+     * {@link #outTypeSize}: that one describes a glyph drawn on a canvas
+     * this module owns, whereas this one is a view whose box has to be measured
+     * and reserved in the status bar's layout, so it is tuned on its own scale.
+     */
+    public int outSignalSize;
     public int typeWeight;
     public int trackAlpha;
 
@@ -146,6 +154,7 @@ public final class TrioSettings {
         s.valueWeight = Prefs.DEF_VALUE_WEIGHT;
         s.typeSize = Prefs.DEF_TYPE_SIZE;
         s.outTypeSize = Prefs.DEF_OUT_TYPE_SIZE;
+        s.outSignalSize = Prefs.DEF_OUT_SIGNAL_SIZE;
         s.typeWeight = Prefs.DEF_TYPE_WEIGHT;
         s.trackAlpha = Prefs.DEF_TRACK_ALPHA;
         s.debugLog = Prefs.DEF_DEBUG_LOG;
@@ -204,6 +213,9 @@ public final class TrioSettings {
         s.outTypeSize = Prefs.clamp(
                 p.getInt(Prefs.KEY_OUT_TYPE_SIZE, Prefs.DEF_OUT_TYPE_SIZE),
                 Prefs.MIN_OUT_TYPE_SIZE, Prefs.MAX_OUT_TYPE_SIZE);
+        s.outSignalSize = Prefs.clamp(
+                p.getInt(Prefs.KEY_OUT_SIGNAL_SIZE, Prefs.DEF_OUT_SIGNAL_SIZE),
+                Prefs.MIN_OUT_SIGNAL_SIZE, Prefs.MAX_OUT_SIGNAL_SIZE);
         s.typeWeight = Prefs.clamp(
                 p.getInt(Prefs.KEY_TYPE_WEIGHT, Prefs.DEF_TYPE_WEIGHT),
                 Prefs.MIN_TYPE_WEIGHT, Prefs.MAX_TYPE_WEIGHT);
@@ -288,6 +300,7 @@ public final class TrioSettings {
         s.valueWeight = valueWeight;
         s.typeSize = typeSize;
         s.outTypeSize = outTypeSize;
+        s.outSignalSize = outSignalSize;
         s.typeWeight = typeWeight;
         s.trackAlpha = trackAlpha;
 
@@ -339,6 +352,7 @@ public final class TrioSettings {
             case Prefs.KEY_VALUE_WEIGHT: valueWeight = src.valueWeight; return true;
             case Prefs.KEY_TYPE_SIZE: typeSize = src.typeSize; return true;
             case Prefs.KEY_OUT_TYPE_SIZE: outTypeSize = src.outTypeSize; return true;
+            case Prefs.KEY_OUT_SIGNAL_SIZE: outSignalSize = src.outSignalSize; return true;
             case Prefs.KEY_TYPE_WEIGHT: typeWeight = src.typeWeight; return true;
             case Prefs.KEY_TRACK_ALPHA: trackAlpha = src.trackAlpha; return true;
             case Prefs.KEY_DEBUG_LOG: debugLog = src.debugLog; return true;
@@ -405,6 +419,9 @@ public final class TrioSettings {
         s.outTypeSize = Prefs.clamp(
                 bundle.getInt(Prefs.KEY_OUT_TYPE_SIZE, Prefs.DEF_OUT_TYPE_SIZE),
                 Prefs.MIN_OUT_TYPE_SIZE, Prefs.MAX_OUT_TYPE_SIZE);
+        s.outSignalSize = Prefs.clamp(
+                bundle.getInt(Prefs.KEY_OUT_SIGNAL_SIZE, Prefs.DEF_OUT_SIGNAL_SIZE),
+                Prefs.MIN_OUT_SIGNAL_SIZE, Prefs.MAX_OUT_SIGNAL_SIZE);
         s.typeWeight = Prefs.clamp(
                 bundle.getInt(Prefs.KEY_TYPE_WEIGHT, Prefs.DEF_TYPE_WEIGHT),
                 Prefs.MIN_TYPE_WEIGHT, Prefs.MAX_TYPE_WEIGHT);
@@ -471,6 +488,7 @@ public final class TrioSettings {
         b.putInt(Prefs.KEY_VALUE_WEIGHT, valueWeight);
         b.putInt(Prefs.KEY_TYPE_SIZE, typeSize);
         b.putInt(Prefs.KEY_OUT_TYPE_SIZE, outTypeSize);
+        b.putInt(Prefs.KEY_OUT_SIGNAL_SIZE, outSignalSize);
         b.putInt(Prefs.KEY_TYPE_WEIGHT, typeWeight);
         b.putInt(Prefs.KEY_TRACK_ALPHA, trackAlpha);
 

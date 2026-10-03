@@ -625,24 +625,51 @@ final class TrioRenderer {
     }
 
     /**
-     * Ink height of the reading in reference units, with or without a dot row.
+     * How much of the reference box the drawing actually fills, with or without a
+     * dot row. Used to centre the ink inside a box that is always
+     * {@link TrioGeometry#STACK_INK_H} tall.
      *
-     * <p>Both the view's own height and the drawn scale come from this, so the
-     * glyph is exactly as tall as the status bar row allows and never leaves the
-     * dot row's worth of empty space behind when there is no dot row.
+     * <p>Deliberately no longer what the scale is divided by. It used to be, and
+     * that made a reading without a dot row divide its pixels by a box 209/150
+     * times shorter - so the very same four bars came out 1.39x taller beside no
+     * dot row than beside one, and the single-SIM reading towered over the
+     * dual-SIM one. The box is the reading's frame, not its content.
      */
     static float outSignalInkH(boolean dots) {
         return dots ? TrioGeometry.STACK_INK_H
                 : TrioGeometry.STACK_BAR_H[TrioGeometry.STACK_COLUMNS - 1];
     }
 
-    /** The pixel width that gives {@code height} pixels of ink the reference aspect. */
-    static int outSignalWidth(int height, boolean dots) {
+    /**
+     * The pixel height of the reading's box at the user's {@code sizeDp}, on a
+     * display of the given {@code density}.
+     *
+     * <p>Deliberately independent of any view: the reading's size used to be a
+     * share of the row it stood in, so MIUI laying that row out taller - which
+     * is exactly what pulling the control centre down does, 88px to 134px on the
+     * test device - made the reading grow with it. A dp is fixed.
+     *
+     * <p>One box for both shapes: a reading with a dot row and one without are
+     * given the same box, so switching between them - a second SIM answering, or
+     * the data-SIM-only switch - resizes nothing.
+     */
+    static int outSignalHeight(int sizeDp, float density) {
+        if (sizeDp <= 0 || density <= 0f) {
+            return 0;
+        }
+        return Math.max(1, Math.round(sizeDp * density));
+    }
+
+    /**
+     * The pixel width that gives a box {@code height} pixels tall the reference
+     * aspect, dot row or not.
+     */
+    static int outSignalWidth(int height) {
         if (height <= 0) {
             return 0;
         }
         return Math.max(1,
-                Math.round(height * TrioGeometry.STACK_INK_W / outSignalInkH(dots)));
+                Math.round(height * TrioGeometry.STACK_INK_W / TrioGeometry.STACK_INK_H));
     }
 
     /**
@@ -669,8 +696,13 @@ final class TrioRenderer {
         }
         final boolean dotRow = dots >= 0;
         final float inkW = TrioGeometry.STACK_INK_W;
+        // The scale is always taken from the full reference box, never from the
+        // shorter ink a reading without a dot row actually fills: that shorter
+        // box is only what centres the drawing here, and dividing the pixels by
+        // it would make the same bars a third taller whenever the dot row is
+        // absent.
         final float inkH = outSignalInkH(dotRow);
-        final float scale = Math.min(width / inkW, height / inkH);
+        final float scale = Math.min(width / inkW, height / TrioGeometry.STACK_INK_H);
         if (scale <= 0f) {
             return false;
         }

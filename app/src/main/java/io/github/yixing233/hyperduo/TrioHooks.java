@@ -737,6 +737,14 @@ final class TrioHooks {
                                 state = registerHost(host);
                             }
                             state.refresh();
+                            // MIUI's dark-mode pass ends at this view's own
+                            // invalidate() and nowhere else, so a tint change is
+                            // visible here first - and the out-of-ring views are
+                            // siblings that nothing repaints on their own.
+                            final int ink = state.foreground();
+                            if (state.outRingInk != ink) {
+                                recolourOutRing(state, ink);
+                            }
                             TrioRenderer.draw((Canvas) canvasArg, host, state);
                         }
                         return result;
@@ -1848,7 +1856,61 @@ final class TrioHooks {
                 label.setTextColor(colour);
             }
         }
-        placeOutTypeLabel(container, label, anchor);
+        // Against the reading, not against the battery meter. The label and the
+        // reading are placed by the same rule - the anchor's left edge minus the
+        // gap and the width - so anchoring both at the meter stacks them on top
+        // of each other, and the reading is the wider one. The posted path
+        // already chains through labelAnchorIn; this pass runs on every layout
+        // and would otherwise keep overwriting where that one got it right.
+        placeOutTypeLabel(container, label, labelAnchorIn(container, anchor));
+    }
+
+    /**
+     * Hands a new ink to the out-of-ring views under {@code host}, on the one
+     * frame where the tint changed.
+     *
+     * <p>MIUI's dark-mode pass ends at the battery icon's own
+     * {@code invalidate()}: it tints what it owns and nothing else. Both of the
+     * views here are siblings of the glyph host - mounted in the battery
+     * container, not drawn by it - so that pass never reaches them. The reading
+     * is a plain {@code View} whose {@code onDraw} reads the colour live, so it
+     * only needs the repaint; the label is a {@code TextView} that nothing
+     * re-measures on a tint change, so it needs the colour handed to it
+     * outright.
+     *
+     * <p>The comparison happens in the caller and the book is closed here,
+     * before the post: a frame storm must not queue one recolour per frame, and
+     * the value written is the one the frame was painted with, so the two never
+     * disagree about what is on screen.
+     *
+     * <p>Everything else is posted. This runs inside the glyph's draw pass, and
+     * the lookup walks the parent chain and reads classes - cheap, but the
+     * whole point of the book above is that it runs once per tint change rather
+     * than once per frame.
+     */
+    private static void recolourOutRing(TrioState state, int ink) {
+        state.outRingInk = ink;
+        final View host = state.host;
+        host.post(new Runnable() {
+            @Override
+            public void run() {
+                final Object owner = batteryContainerOf(host);
+                if (!(owner instanceof ViewGroup)) {
+                    return;
+                }
+                final ViewGroup container = (ViewGroup) owner;
+                final OutTypeLabel label = findOutTypeLabel(container);
+                if (label != null && label.getCurrentTextColor() != ink) {
+                    label.setTextColor(ink);
+                }
+                final OutSignalView signal = findOutSignal(container);
+                if (signal != null) {
+                    // It would redraw with the new colour on its own, but only
+                    // if something asked it to - and nothing did.
+                    signal.invalidate();
+                }
+            }
+        });
     }
 
     /**
@@ -1857,7 +1919,7 @@ final class TrioHooks {
      * is Out of ring, a host is registered and that host has been measured.
      */
     private static void requestOutTypeSync(final ViewGroup container) {
-        if (TrioConfig.appearance().typeOutOfRing) {
+        if (!TrioConfig.appearance().typeOutOfRing) {
             return;
         }
         final View host = hostIn(container);
@@ -2230,8 +2292,10 @@ final class TrioHooks {
             if (source == null) {
                 return;
             }
-            // Read on every frame rather than cached: the row is invalidated
-            // when the tint changes, and that is exactly when this colour moves.
+            // Read on every frame rather than cached. Nothing invalidates this
+            // view when the tint changes - it is a sibling of the glyph host,
+            // outside the chain MIUI's dark-mode pass walks - so the frame has
+            // to be asked for, and it is asked for by recolourOutRing().
             final TrioState state = stateFor(source);
             final int fg = (state != null) ? state.foreground() : 0xFFFFFFFF;
             TrioRenderer.drawOutSignal(canvas, getWidth(), getHeight(), bars, dots, fg,
@@ -2313,10 +2377,11 @@ final class TrioHooks {
         if (reading[0] < 0) {
             reading[0] = 0;
         }
-        // Size changed - a SIM appearing or disappearing, or the row resizing -
-        // is a re-measure, so it goes back through the posted path.
+        // Size changed - a SIM appearing or disappearing, the row resizing, or
+        // the size slider moving - is a re-measure, so it goes back through the
+        // posted path.
         if (view.bars != reading[0] || view.dots != reading[1]
-                || view.getMeasuredHeight() != anchor.getHeight()) {
+                || view.getMeasuredHeight() != outSignalHeight(host)) {
             requestOutSignalSync(container);
             return;
         }
@@ -2427,12 +2492,11 @@ final class TrioHooks {
         if (reading[0] < 0) {
             reading[0] = 0;
         }
-        final int height = anchor.getHeight();
+        final int height = outSignalHeight(host);
         if (height <= 0) {
             return;
         }
-        final boolean dotRow = reading[1] >= 0;
-        final int width = TrioRenderer.outSignalWidth(height, dotRow);
+        final int width = TrioRenderer.outSignalWidth(height);
         if (width <= 0) {
             return;
         }
@@ -2447,6 +2511,16 @@ final class TrioHooks {
         // this view's width plus the label's, and the gap around both.
         reserveOutRingStrip(container);
         placeOutTypeLabel(container, view, anchor);
+        // The reading is not part of this view's geometry: the height comes from
+        // the battery meter and the width from that height alone, so switching
+        // between the one-row and two-row reading - or any SIM falling off the
+        // network - repaints nothing on its own. setVisibility() is skipped
+        // because the view is already VISIBLE, and the invalidate() the rest of
+        // the module does lands on the glyph host, which is a sibling: it never
+        // redraws this view. Without this line the new reading only appears when
+        // something unrelated re-measures this view, which in practice means the
+        // out-of-ring size slider.
+        view.invalidate();
         if (debugLog()) {
             log(LOG_INFO, "out signal: bars=" + reading[0] + " dots=" + reading[1]
                     + " view=" + view.getWidth() + "x" + view.getHeight()
@@ -2454,6 +2528,21 @@ final class TrioHooks {
                     + " anchor=" + anchor.getLeft() + ".." + anchor.getRight()
                     + " container=" + container.getWidth() + "x" + container.getHeight());
         }
+    }
+
+    /**
+     * The height the out-of-ring reading wants, after the size setting. Both the
+     * measure and the change check above go through here so a slider move and a
+     * re-measure can never disagree about the target.
+     *
+     * <p>Only the display's density is taken from {@code host}; its measured
+     * height deliberately is not. MIUI lays the battery container out at one
+     * height at rest and at the full {@code statusBars} inset once the control
+     * centre is pulled down, so a size derived from the row grew with the shade.
+     */
+    private static int outSignalHeight(View host) {
+        final float density = host.getResources().getDisplayMetrics().density;
+        return TrioRenderer.outSignalHeight(TrioConfig.appearance().outSignalSize, density);
     }
 
     /**

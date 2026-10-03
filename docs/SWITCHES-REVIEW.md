@@ -306,7 +306,7 @@ record KeyDef(String key, Kind kind, int def, int min, int max,
 - **签名变化**：`generalTab` / `geometryTab` / `colorsTab` 三个 tab 的函数都**去掉了 `gated` 参数**，改为自己从 `settings` 推出 `val a = TrioAppearance.of(settings)`。这正是「规则只有一处真源」的直接体现：不再把总开关当作一个横传的布尔值往下发。四个 `entry<Route.*>` 调用点同步不再传 `gated`。
 - **三个 tab 的全部门禁改为 `a.*`**，文件里 `gated` 一词只剩五处英文注释里的普通用词（`SettingsScreen.kt:375`、`:642`、`:676`、`:726`、`:1746`），**零处代码**——`gated` 这个参数名随之从这个文件里消失。
 - `generalTab`：master Switch 恒可点（不加 `enabled`）；trio_style 下拉 `enabled = a.glyph` / `selectedIndex = a.style`；showWifi、showMobile、showValue、typeModes 下拉、signal_mode 下拉均只门禁 `a.glyph`；双卡行 `enabled = a.glyph && a.mobile`；stacked_signal 行 `enabled = a.glyph && a.signalOutOfRing`；data_sim_only 行 `enabled = a.glyph && a.signalOutOfRing && a.stackedSignal`；showBolt 行 `enabled = a.glyph && a.value`，其提示链用 `a.value to show_value_title`。（**此处曾在落地时写成 `a.glyph && a.drawsBolt()` 并造成自锁，见 6.7。**）
-- `geometryTab`：拆成四组、同页多张 Card，每组一个 `SectionTitle`——`group_stroke`（环线/弧线粗细）、`group_text`（数字字号/字重）、`group_type`（环内类型字号/环外字号/类型字重）、`group_track`（底纹浓度）。落地的分组与提案 P0-3 的**五项并不同**：提案里的「圆环」「矩形」两组没有采用，因为两种样式共用同一批滑块、并不存在只对矩形生效的滑块（正是 6.2 第 2 条把 `bar_stroke` 砍掉的结果），把它们拆成两张卡只会让人以为有两套尺寸。改为按**量纲**分组（描边 / 文字 / 网络类型 / 底纹）。
+- `geometryTab`：拆成四组、同页多张 Card，每组一个 `SectionTitle`——`group_stroke`（环线/弧线粗细）、`group_text`（数字字号/字重）、`group_type`（环内类型字号/环外字号/环外信号大小/类型字重）、`group_track`（底纹浓度）。落地的分组与提案 P0-3 的**五项并不同**：提案里的「圆环」「矩形」两组没有采用，因为两种样式共用同一批滑块、并不存在只对矩形生效的滑块（正是 6.2 第 2 条把 `bar_stroke` 砍掉的结果），把它们拆成两张卡只会让人以为有两套尺寸。改为按**量纲**分组（描边 / 文字 / 网络类型 / 底纹）。**所有尺寸项归同一张卡**，所以「环外信号大小」也落在 `group_type`（第十轮补，见 6.8），而不是与 `stacked_signal` 两个开关同卡。
 - 矩形样式下的文案切换：`stroke_title` → `stroke_title_rect`「电量条粗细」、`stroke_summary` → `stroke_summary_rect`、`arc_stroke_summary` → `arc_stroke_summary_rect`（补上「同时决定这组弧线在顶部纵向位置」），全部由 `if (a.rect)` 选择。这兑现了 `TrioRenderer.drawRectBatteryBar` javadoc 里「设置页会把它改称 bar thickness」的承诺。
 - `colorsTab`：roleColors 开关 `enabled = a.glyph`；低电量阈值、六行颜色、颜色页「恢复默认」全部 `enabled = a.glyph && a.roleColors`。
 - **`enabledCount` 重写**（关于页「已开启显示项」）：旧实现统计 6 个原始布尔、不含总开关，于是总开关关掉后它仍然报出「5」，与「实际画了几个东西」不是一回事。新实现从规则派生：`if (!a.glyph) return 0; listOf(a.wifi, a.mobile, a.dualSim && a.signalDots(), a.value, a.drawsBolt(), a.typeAnywhere()).count { it }`。第二轮改动把第二排那一项由 `a.dualSim && a.mobile` 改成 `a.dualSim && a.signalDots()` —— 双卡两排**只在环内存在**，环外底部什么都不画，所以环外时它不该算第二个东西；`a.mobile` 本身仍计入，因为环外堆叠时读数由 `OutSignalView` 画出来，只是换了位置。
@@ -340,9 +340,9 @@ record KeyDef(String key, Kind kind, int def, int min, int max,
 
 **唯一一处有意的行为变化**：矩形样式下「电量数字居中」由「静默无效」改为**不可用并给出提示**（`enabled = a.glyph && !a.rect && a.wifi && a.value`，提示链含 `!a.rect to trio_style_ring`）。这是 2.3 那条矛盾的正解：以前矩形下这个开关点得动但什么也不发生，现在它明说自己是圆环专属。
 
-### 6.7 上机后由用户发现的三个问题
+### 6.7 上机后由用户发现的四个问题
 
-落地版装到真机（houji / 小米 14，Android 17）之后，用户报了三个问题，都是这次改造自己引入的，记录如下。
+落地版装到真机（houji / 小米 14，Android 17）之后，用户报了四个问题，都是这次改造自己引入的，记录如下。
 
 **一、「三合一样式」摘要里出现了「或参考图那样的矩形」（用户原话：怎么现在会写一个"或参考图那样的矩形"？？？？？能不能好好写了）**
 
@@ -371,3 +371,55 @@ record KeyDef(String key, Kind kind, int def, int min, int max,
 - 修复：`getMiuiLevel()` 不在公开 SDK（SDK 37 的 `android.jar` 里 `android.telephony.SignalStrength` 只有 `public int getLevel();`），所以新增 `TrioState.miuiLevel(SignalStrength)` 用 `Refl.callByName(strength, "getMiuiLevel")` 反射取，非 `Number` 才退回 `strength.getLevel()`；0..4 之外的拒绝规则不变。
 - 防回归：`work\simcheck\verify.ps1` 升为**三构建**，第三个反例把 `final int level = miuiLevel(strength);` 换回 `strength.getLevel();`。固定版 `exit 0`（47 条），该反例 `exit 1` 且**恰好 4 条**不符（正是那 4 条 MIUI 断言）。
 - **教训**：凡是「跟着系统状态栏读数」的地方，必须抄**系统实际用的那套口径**，不能照公开 SDK 的等价方法想当然——MIUI 有大量 `getMiuiXxx()` 扩展，公开 API 只是它的子集。
+
+**四、环外信号类型的字体颜色跟随深浅色不及时（用户原话：目前我们自行绘制的环外信号类型，像 5G 的字体颜色，似乎有跟随状态栏文本变色的逻辑……但是它的更新不是很及时）**
+
+- 根因：环外两个自建视图（`OutTypeLabel` / `OutSignalView`）的前景色都读 `TrioState.foreground()`，但**没有任何东西会在深浅色变化时重绘它们**。MIUI 的深浅色流程必然 invalidate 电池图标视图（`MiuiBatteryMeterView.updateLightDarkTint` → `:1189 onDarkChangeInternal()` → `MiuiBatteryMeterIconView.java:504-505`），所以 `hyperduo-draw` 必然重跑；但那条链只给自己重新着色，两个环外视图是 glyph host 的**兄弟**，`MiuiStatusBatteryContainer` 又完全没有 tint 处理，`settle()` 里的 `refreshOutTypeLabel` 还被 `onLayout` 门禁卡住。**更隐蔽的是代码里原本的注释把这个错误信念写成了事实**：`OutSignalView.onDraw` 写着「the row is invalidated when the tint changes」——它被 invalidate 的场景只有「尺寸/读数变化」那一条（`updateOutSignal` 尾部），颜色变化从来不在其中。
+- 修法：`TrioHooks.recolourOutRing(TrioState state, int ink)`，由 `hyperduo-draw` 钩子在 `state.refresh()` 之后比较 `state.foreground()` 与 `TrioState.outRingInk`，**只在不等的帧**记账并 post 一次重着色（标签 `setTextColor`、读数 `invalidate()`）。
+- 两个设计决定：**账记在 `TrioState` 实例字段而非静态字段**（状态栏与控制中心各有一个电池容器，前景色相同，共享静态格会让先画的把变化吞掉），**先记账再 post**（帧抖动不能每帧排 runnable，且记下的正是本帧画出去的值）。
+- **判据只有真机能给**（改深浅色的那一下是否立刻跟上），设备离线时缺此证据；离线侧只保证编译与五条工装不回归，外加产物核对：`app-release.apk` 的 `classes.dex` 同时含 `recolourOutRing` 与 `outRingInk`（debug 包在 `classes3.dex`），排除「改动没进产物」。
+- **离线钉子**：`TrioHooks` 需要 Xposed API、桌面上编不了，所以这条规则和该文件里其它几条一样，
+  在 `work\outringcheck\verify.ps1`（不入库）里钉源码：四条成对断言（只在不等的帧记账 / 先记账再
+  post / 标签拿到新墨色 / 读数被要求重绘）加两条形状断言（错误注释不得复活、`outRingInk` 必须是
+  实例字段且 `foreground()` 仍把 0 折成 `DEFAULT_FOREGROUND`）。七种回归形态各自实测都能把钉子碰响。
+- **教训**：自绘视图挂进系统视图树后，**「谁会在什么时候 invalidate 我」必须自己举证**，不能沿用宿主视图的刷新假设——宿主被 invalidate 不等于兄弟也被 invalidate。注释里写下的这类假设，正是后来找 bug 时最该先怀疑的一句。
+
+### 6.8 第十轮：环外信号尺寸异常与「环外信号大小」
+
+用户报告两件事：**「环外信号尺寸异常」**与**「增加环外信号尺寸的调节功能」**，并要求参考 `https://github.com/ColdP/HyperChanger`。两者同源，一起做。
+
+**一、尺寸异常的真身**
+
+`TrioRenderer.outSignalInkH(boolean dots)` 原本随有无点行返回**两个不同的墨高**：有点行 `STACK_INK_H`（209），无点行 `STACK_BAR_H[STACK_COLUMNS-1]`（150）。而它同时被两处当分母用：
+
+```java
+// TrioRenderer.outSignalWidth(int height, boolean dots)  —— 旧
+return Math.max(1, Math.round(height * TrioGeometry.STACK_INK_W / outSignalInkH(dots)));
+// TrioRenderer.drawOutSignal(...)  —— 旧
+final float scale = Math.min(width / inkW, height / outSignalInkH(dotRow));
+```
+
+于是**同一宿主高度**下，无点行的读数按 150 单位撑满整盒、有点行按 209，柱子被放大 `209/150 ≈ 1.39` 倍——单卡（无点行）比双卡明显粗大一截，这就是用户看到的「尺寸异常」。
+
+- 修法：**参照框永远取 `STACK_INK_H`**。`outSignalWidth` 收为单参 `static int outSignalWidth(int height)`，分母写死 `TrioGeometry.STACK_INK_H`；`drawOutSignal` 内 `scale = Math.min(width / inkW, height / TrioGeometry.STACK_INK_H)`。`outSignalInkH(dots)` 保留但**语义降级**为「居中用的墨高」（`x0` 与 `baseline` 仍按它算），不再是 scale 的分母——所以无点行时读数在同一个 209 框里居中，上下各留一点空，不再被放大。
+- **必须同时改两行才能复现**：只改 `drawOutSignal` 的 scale 或只改 `outSignalWidth`，两者会互相抵消（宽度按 150 算出来、scale 又按 209 缩回去，实测只差 3px）。`work\outringcheck\verify.ps1` 的 `squat` 反例因此用**两段** `[regex]::Replace`（`$boxRule` 与 `$widthRule`），各须恰好命中 1 处否则 throw。
+
+**二、新设置项**
+
+- 键值 `out_signal_size_dp`（**常量名仍是 `Prefs.KEY_OUT_SIGNAL_SIZE`**，只改了它的字符串字面量），**int dp**，默认 `15`（= 与状态栏图标同高），范围 `6..20`（`MIN_OUT_SIGNAL_SIZE` / `MAX_OUT_SIGNAL_SIZE`）。**不欠迁移**：旧值 `out_signal_size` 从未随任何一次发布出货，框架也不做类型转换、每个键终身只有一种类型，所以没有历史键要读。
+- 换算入口：`TrioRenderer.outSignalHeight(int sizeDp, float density)`（纯算术，`sizeDp <= 0 || density <= 0f` → 0，否则 `Math.max(1, Math.round(sizeDp * density))`）；`TrioHooks.outSignalHeight(View host)` 是唯一包 `TrioConfig.appearance().outSignalSize` 的地方，它**只从视图取密度**（`host.getResources().getDisplayMetrics().density`），视图的测量高度**故意不取**，**measure 与变更检查都走它**（`view.getMeasuredHeight() != outSignalHeight(host)`），所以滑杆与重新测量不可能对目标高度各执一词。
+- **为什么是 dp（bug (g)）**：用户报「而且下拉到控制中心后这个信号还会莫名其妙的放大,需要修复」。旧语义是电池容器**活高度**的百分比，而 MIUI 把那行在收起时常驻 88px、拉开控制中心后变成 134px（就是系统 `statusBars` inset 的高度，`dumpsys window displays` 实测），读数于是跟着放大 `134/88 ≈ 1.52` 倍。dp × 密度与那一行多高毫无关系，物理大小不随下拉改变。15dp 也不是随手取的：测试机（小米 houji / Redmi K70，1200×2670，`Physical density: 480` 即 density 3）上 MIUI 自己那四条信号柱墨高 44px，`15 × 3 = 45` 正好同高；`6..20dp` 在 density 3 下是 18..60px，下界是四根柱仍分得清的最小值，上界是状态栏那一行在开始挤动邻居图标之前能容下的最大值。
+- UI：滑杆落在**尺寸卡** `group_type`（紧跟 `out_type_size` 之后），门禁 `enabled = a.stackedOut()`——直接复用谓词而不是重抄三个条件；提示链点名的四条上游开关（`master` / `show_mobile` / `signal_mode` / `stacked_signal`）**都不含本行自身**，符合 6.7 二的自锁规则。
+- 预览第 8 格（`preview_out_signal`）同步走 `TrioRenderer.outSignalHeight(a.outSignalSize, density)`（`TrioPreviewView` 自己从 display 取 `density`），所以滑杆在设置页有可见反馈。
+
+**三、HyperChanger 对比**
+
+参考项目 `ColdP/HyperChanger` 有同类实现：键 `stacked_mobile_signal_scale` / `_vertical_offset` / `_left_margin` / `_right_margin` **全为 float**，夹取 `scale.coerceIn(0.1f, 3f)`、其余 `coerceIn(-8f, 8f)`，应用方式是给容器打 `scaleX`（还额外乘 1.06）/ `scaleY` / `translationY` + 改 margin，**不重算几何**。本项目改取 **int dp + 重算几何**，理由与它同源（本模块所有既有设置项都是 int、UI 用 `IntSlider`），但单位是 **dp 而不是百分比**：dp 在任何密度上都能自己换算成正确的像素，百分比则必须依附某个参照高度，而这里可依附的那一行恰恰会变——bug (g) 就是这么来的。dp 也胜过 px：px 换一块密度不同的屏就偏大或偏小了。且环外读数是自绘的、本来就有几何可算；抄它的容器缩放会和本模块「按参考图单位逐项算出墨迹」的路线打架。
+
+**四、验证**
+
+- `work\outringcheck\verify.ps1` 升为**四构建**：`fixed` 期望 0，`refold` / `inert` / `squat` 期望非 0，实测 3 / 14 / 3 条不符，脚本 `exit 0`。`squat` 的尺寸断言实测 `the tallest bar is the same size with and without a dot row (51 vs 72 px)`——51/72 就是 1.39× 等比缩放后的同一件事。
+- **断言教训一（取样点必须与几何无关）**：第一版按**正确公式**算最高柱横坐标再取样，而 `squat` 构建的几何恰是错的 ⇒ 取样列落在柱外、量到空画布，实测 `51 vs 0 px`，反例照样「失败」但失败的理由是错的。改为 `tallestRun(img)`（全画布扫最长连续亮段）+ `inkSpan(img)`（最左/最右亮列打包成一个 long），不依赖任何几何假设。
+- **断言教训二（出图工装写死尺寸就看不见尺寸 bug）**：`OutSignalShot` 原来把三个单元格的宽高写死成参考框 `251×209`，于是 `squat` 也报 `PASS`；改成**向生产同一对函数要盒子**（取一个合成密度 `STACK_INK_H / shipped`，于是 `outSignalHeight(shipped, STACK_INK_H / shipped)` 恰好让交付的 dp 设置渲染成参考框 `251×209` 的 1:1 结果，再 `outSignalWidth(...)`）之后，`squat` 立刻报 `FAIL: 6 measurement(s) differ from the reference`（含 `MISMATCH bar_w: reference 50 vs rendered 49` 与 `one SIM (bars only) bar heights: [104, 139, 174, 209] vs the two-SIM reading's [75, 100, 125, 150]`），`fixed` 仍 `PASS`。
+- `compare.py` 判据同步调整：参考图逐项比对只跑**两卡格**（其墨恰好填满 209 参考框、零偏移）；单卡/上网卡改为与两卡格逐根比柱高（容差 1px）——它们在 209 框里居中会少 1px 抗锯齿边缘，拿它们去比参考图量到的是**居中**而非几何。
+- Gradle `:app:assembleDebug --offline` `BUILD SUCCESSFUL`。

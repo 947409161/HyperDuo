@@ -97,6 +97,7 @@ class SettingsRepository(context: Context) {
     fun setValueWeight(value: Int) = writeInt(Prefs.KEY_VALUE_WEIGHT, value)
     fun setTypeSize(value: Int) = writeInt(Prefs.KEY_TYPE_SIZE, value)
     fun setOutTypeSize(value: Int) = writeInt(Prefs.KEY_OUT_TYPE_SIZE, value)
+    fun setOutSignalSize(value: Int) = writeInt(Prefs.KEY_OUT_SIGNAL_SIZE, value)
     fun setTypeWeight(value: Int) = writeInt(Prefs.KEY_TYPE_WEIGHT, value)
     fun setTrackAlpha(value: Int) = writeInt(Prefs.KEY_TRACK_ALPHA, value)
 
@@ -145,6 +146,7 @@ class SettingsRepository(context: Context) {
             prefs.putInt(Prefs.KEY_VALUE_WEIGHT, snapshot.valueWeight)
             prefs.putInt(Prefs.KEY_TYPE_SIZE, snapshot.typeSize)
             prefs.putInt(Prefs.KEY_OUT_TYPE_SIZE, snapshot.outTypeSize)
+            prefs.putInt(Prefs.KEY_OUT_SIGNAL_SIZE, snapshot.outSignalSize)
             prefs.putInt(Prefs.KEY_TYPE_WEIGHT, snapshot.typeWeight)
             prefs.putInt(Prefs.KEY_TRACK_ALPHA, snapshot.trackAlpha)
 

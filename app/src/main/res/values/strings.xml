@@ -54,6 +54,9 @@
     <string name="data_sim_only_title">仅显示上网卡</string>
     <string name="data_sim_only_summary">双卡时只绘制当前上网卡的读数，另一张卡不显示。单卡或读不到上网卡时不受影响。</string>
 
+    <string name="out_signal_size_title">环外信号大小</string>
+    <string name="out_signal_size_summary">环外读数的整体高度，单位为 dp（会随屏幕密度自动换算成像素）。15dp 与状态栏原生信号图标同高，也是默认值；可调范围 6–20dp。无论有没有下方圆点排，同一行都按同一大小绘制，两种形状不会一大一小。下拉控制中心不会改变它。</string>
+
     <string name="value_centre_title">电量数字居中</string>
     <string name="value_centre_summary">电量数字放大到圆环中间并始终优先占据圆心。Wi-Fi 弧缩到顶部缺口，充电时改用小的闪电占用缺口（此时不画 Wi-Fi 弧），环内的网络类型也让位到缺口。</string>
 
