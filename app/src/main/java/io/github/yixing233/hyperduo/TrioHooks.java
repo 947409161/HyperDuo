@@ -2111,39 +2111,42 @@ final class TrioHooks {
      * reads away from: left of it in LTR, right of it in RTL. This is the gap
      * MIUI's own {@code mobile_type} label used to fill.
      */
-    private static void placeOutTypeLabel(ViewGroup container, View label, View anchor) {
-        placeOutTypeLabel(container, label, anchor, 0, 0);
+    private static void placeOutTypeLabel(ViewGroup container, View view, View anchor) {
+        placeOutTypeLabel(container, view, anchor, outLabelAnchorGap(container));
     }
 
     /**
-     * The same placement, with an extra nudge for the out-of-ring reading.
+     * The same placement, with the gap toward the anchor given explicitly.
+     *
+     * <p>Every out-of-ring view is positioned by a <em>gap</em>, never by a
+     * position. That is the whole point: {@link #reserveOutRingStrip} reserves
+     * this same number plus the view's width out of the native icon row, so a
+     * larger gap moves the view away from its neighbour <em>and</em> pushes the
+     * icons over by the same amount. A free position offset - which this
+     * replaced - moved the view without reserving anything, so a large enough
+     * value painted the reading over the icons it should have displaced.
      *
      * <p>Which physical gap each margin supplies flips with the reading
      * direction, and getting it backwards is invisible in LTR and wrong in RTL:
      *
      * <pre>
-     *   LTR:  [label] --right margin-- [reading] --right margin-- [battery]
-     *   RTL:  [battery] --right margin-- [reading] --left margin-- [label]
+     *   LTR:  [label] --label right-- [reading] --signal margin-- [battery]
+     *   RTL:  [battery] --signal margin-- [reading] --label left-- [label]
      * </pre>
      *
-     * <p>So LTR places the label at {@code anchor.getLeft() - right - width} and
-     * RTL at {@code anchor.getRight() + left}: each uses the margin on the side
-     * that actually faces the anchor. The outward gap - the one facing the
-     * native icon row - is the other margin, and
-     * {@link #reserveOutRingStrip} is where it turns into padding.
+     * <p>So {@code gap} is always "the space between this view and its anchor",
+     * and this method only decides which side that is: the view goes at
+     * {@code anchor.getLeft() - gap - width} in LTR and
+     * {@code anchor.getRight() + gap} in RTL.
      *
-     * <p>{@code offsetX}/{@code offsetY} are the out-of-ring reading's nudge, and
-     * are zero for the label itself. The label nevertheless follows the reading
-     * horizontally: it anchors on the reading's laid-out left edge, which already
-     * carries the nudge. That is deliberate - a reading that slid out from under
-     * its own label would overlap it - while the label keeps its own vertical
-     * place, since its position is requirement of its own (the margins above),
-     * not of the reading.
+     * <p>The view is centred on its anchor vertically and is never offset on
+     * that axis. A status-bar row has no vertical room to reserve, so a vertical
+     * nudge could only ever overlap the icons - there is nothing for it to
+     * displace.
      */
-    private static void placeOutTypeLabel(ViewGroup container, View label, View anchor,
-                                          int offsetX, int offsetY) {
-        final int width = label.getMeasuredWidth();
-        final int height = label.getMeasuredHeight();
+    private static void placeOutTypeLabel(ViewGroup container, View view, View anchor, int gap) {
+        final int width = view.getMeasuredWidth();
+        final int height = view.getMeasuredHeight();
         if (width <= 0 || height <= 0 || anchor.getWidth() <= 0) {
             return;
         }
@@ -2151,16 +2154,13 @@ final class TrioHooks {
         // protected in View, and the result is identical.
         final boolean rtl =
                 container.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
-        final int[] margins = outLabelMargins(container);
-        // LTR reads left-to-right, so the label stands to the left of its anchor
-        // and the gap between them is the label's right margin; RTL mirrors both.
-        int left = rtl ? anchor.getRight() + margins[0]
-                       : anchor.getLeft() - margins[1] - width;
+        int left = rtl ? anchor.getRight() + gap : anchor.getLeft() - gap - width;
         int top = anchor.getTop() + (anchor.getHeight() - height) / 2;
         // Stay inside the container even when the meter sits flush against an
         // edge. The container itself carries no padding here - the include in
         // status_bar.xml puts status_bar_padding_start on the parent - so this
-        // normally clamps to 0 and only bites in the RTL case.
+        // normally clamps to 0 and only bites in the RTL case, or once the gap
+        // has grown past the room the container actually has.
         final int minLeft = container.getPaddingLeft();
         final int maxLeft = container.getWidth() - container.getPaddingRight() - width;
         if (maxLeft >= minLeft) {
@@ -2181,12 +2181,7 @@ final class TrioHooks {
                 top = minTop;
             }
         }
-        // The nudge lands after the clamp on purpose: the clamp keeps the reading
-        // inside the row by default, but a user who asks for a nudge gets the
-        // nudge it asked for, even where that leaves the row's bounds.
-        left += offsetX;
-        top += offsetY;
-        label.layout(left, top, left + width, top + height);
+        view.layout(left, top, left + width, top + height);
         // The anchor only moves when the battery itself does, and the battery
         // never moves for the island - MIUI slides the icon row instead. So the
         // frame laid out above is the island-free position, and the island is
@@ -2195,9 +2190,17 @@ final class TrioHooks {
         // layout maths means the two paths never have to agree on a number:
         // whatever shift the row took, the label takes the same one.
         final float shift = islandShiftPx(container);
-        if (label.getTranslationX() != -shift) {
-            label.setTranslationX(-shift);
+        if (view.getTranslationX() != -shift) {
+            view.setTranslationX(-shift);
         }
+    }
+
+    /** The label's margin on the side that faces its anchor, in pixels. */
+    private static int outLabelAnchorGap(ViewGroup container) {
+        final boolean rtl =
+                container.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+        final int[] margins = outLabelMargins(container);
+        return rtl ? margins[0] : margins[1];
     }
 
     /**
@@ -2223,25 +2226,10 @@ final class TrioHooks {
                 Math.round(a.outTypeMarginRight * density)};
     }
 
-    /** The nudge applied to the out-of-ring reading's frame, in pixels. */
-    private static int[] outSignalOffset(View container) {
+    /** The gap the out-of-ring reading keeps from the battery, in pixels. */
+    private static int outSignalMargin(View container) {
         final float density = container.getResources().getDisplayMetrics().density;
-        final TrioAppearance a = TrioConfig.appearance();
-        return new int[] {
-                Math.round(a.outSignalOffsetX * density),
-                Math.round(a.outSignalOffsetY * density)};
-    }
-
-    /**
-     * The gap the label keeps from the reading or the native icons, in pixels,
-     * whichever physical side {@code rtl} puts the label on.
-     *
-     * <p>LTR draws the label to the <em>left</em> of its anchor, so the gap
-     * between them is the label's right margin; RTL mirrors that.
-     */
-    private static int outLabelGap(View container, boolean rtl) {
-        final int[] margins = outLabelMargins(container);
-        return rtl ? margins[0] : margins[1];
+        return Math.round(TrioConfig.appearance().outSignalMargin * density);
     }
 
     /**
@@ -2499,11 +2487,11 @@ final class TrioHooks {
             return;
         }
         // Shares the label's slot geometry: both stand outside the battery
-        // meter, one against the other, so they are placed by one routine. The
-        // reading is the one that carries the position nudge; the label follows
-        // it horizontally by anchoring on this view's (nudged) frame.
-        final int[] offset = outSignalOffset(container);
-        placeOutTypeLabel(container, view, anchor, offset[0], offset[1]);
+        // meter, one against the other, so they are placed by one routine. Each
+        // is placed by its own reserved margin - the reading by the signal
+        // margin, the label by its two - which is why neither can be nudged onto
+        // a neighbour.
+        placeOutTypeLabel(container, view, anchor, outSignalMargin(container));
     }
 
     /**
@@ -2626,8 +2614,7 @@ final class TrioHooks {
         // Measured first, then reserved: the strip the native row gives up is
         // this view's width plus the label's, and the gap around both.
         reserveOutRingStrip(container);
-        final int[] offset = outSignalOffset(container);
-        placeOutTypeLabel(container, view, anchor, offset[0], offset[1]);
+        placeOutTypeLabel(container, view, anchor, outSignalMargin(container));
         // The reading is not part of this view's geometry: the height comes from
         // the battery meter and the width from that height alone, so switching
         // between the one-row and two-row reading - or any SIM falling off the
@@ -2692,25 +2679,32 @@ final class TrioHooks {
         final boolean signalOn = signal != null && signal.getVisibility() == View.VISIBLE;
         final OutTypeLabel label = findOutTypeLabel(container);
         final boolean labelOn = label != null && label.getVisibility() == View.VISIBLE;
-        // The strip is a single scalar, so the two physical margins have to be
-        // resolved into "toward the battery" and "away from it" here. In LTR the
-        // label stands left of its anchor, so the side facing the anchor is its
-        // right margin; RTL mirrors, exactly as placeOutTypeLabel does.
+        // The strip is a single scalar, so each view's facing margin has to be
+        // resolved to a physical side here. In LTR a view stands left of its
+        // anchor, so the side facing the anchor is its right margin; RTL mirrors,
+        // exactly as placeOutTypeLabel does for the placement itself.
         final boolean rtl =
                 container.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
         final int[] margins = outLabelMargins(container);
-        final int inward = rtl ? margins[0] : margins[1];
-        final int outward = rtl ? margins[1] : margins[0];
+        final int labelInward = rtl ? margins[0] : margins[1];
+        final int labelOutward = rtl ? margins[1] : margins[0];
+        // The reading's own margin, not a label margin: the two are separate
+        // settings, and the reading's is the one that decides how far it sits
+        // from the battery. Reserving it here is what makes the setting move the
+        // icons rather than slide the reading over them.
+        final int signalGap = outSignalMargin(container);
         int total = 0;
         if (signalOn) {
-            total += signal.getMeasuredWidth() + inward;
+            total += signal.getMeasuredWidth() + signalGap;
         }
         if (labelOn) {
-            // The label keeps a gap toward its anchor always, and one away from
-            // it only when it is the outermost view; with the reading in front,
-            // the gap between the two is the inward one already counted above,
-            // and the strip's own edge is what the label's far side meets.
-            total += label.getMeasuredWidth() + (signalOn ? inward : outward + inward);
+            // The label keeps its inward gap - toward the reading, or the battery
+            // when it stands alone - and adds its outward gap only in that
+            // alone case, where the strip's far edge is what its outer side
+            // meets. With the reading in front, the gap between the two is the
+            // inward one already counted, so counting another would reserve a
+            // gap that is not drawn.
+            total += label.getMeasuredWidth() + (signalOn ? labelInward : labelInward + labelOutward);
         }
         if (total <= 0) {
             releaseOutTypeSpace(container);

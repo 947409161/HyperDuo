@@ -104,9 +104,12 @@ public final class TrioAppearance {
      */
     public final int outTypeMarginLeft;
     public final int outTypeMarginRight;
-    /** Nudge applied to the out-of-ring reading's laid-out frame, in dp. */
-    public final int outSignalOffsetX;
-    public final int outSignalOffsetY;
+    /**
+     * Gap between the out-of-ring reading and the battery, in dp. A reserved
+     * margin: it is folded into the strip the native icon row gives up, so the
+     * reading can never be moved on top of its neighbours.
+     */
+    public final int outSignalMargin;
     /** Scale of a trailing "A" in the network type, as a percentage. */
     public final int typeSuffixScale;
     public final int typeWeight;
@@ -149,8 +152,7 @@ public final class TrioAppearance {
         outSignalSize = c.outSignalSize;
         outTypeMarginLeft = c.outTypeMarginLeft;
         outTypeMarginRight = c.outTypeMarginRight;
-        outSignalOffsetX = c.outSignalOffsetX;
-        outSignalOffsetY = c.outSignalOffsetY;
+        outSignalMargin = c.outSignalMargin;
         typeSuffixScale = c.typeSuffixScale;
         typeWeight = c.typeWeight;
     }

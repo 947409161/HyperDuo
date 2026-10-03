@@ -224,17 +224,26 @@ public final class Prefs {
     public static final String KEY_OUT_TYPE_MARGIN_LEFT = "out_type_margin_left_dp";
     public static final String KEY_OUT_TYPE_MARGIN_RIGHT = "out_type_margin_right_dp";
     /**
-     * How far the out-of-ring signal reading is nudged from the place the status
-     * bar computed for it, in density pixels; positive is right and down.
+     * The gap between the out-of-ring signal reading and the battery meter, in
+     * density pixels.
      *
-     * <p>Applied to the reading's laid-out frame rather than to its drawing, so
-     * the label anchored on the reading follows it instead of being left behind.
-     * Kept as dp for the same reason as the margins above.
+     * <p>A margin rather than a position. This length is reserved out of the
+     * native icon row exactly like the label margins above, so widening it moves
+     * the reading away from the battery <em>and</em> pushes the icons over by the
+     * same amount. An earlier version of this setting was a free position offset
+     * instead: it moved the view without reserving anything, so the reading slid
+     * out of the room set aside for it and painted over the neighbouring icons.
      *
-     * <p>New names, never a reuse - see {@link #KEY_MOBILE_TYPE_MODE}.
+     * <p>dp for the same reason as the label margins: the status bar's real pixel
+     * space, whose row height MIUI changes under the control centre.
+     *
+     * <p>Defaults to the gap that was hard-coded before it was settable, so an
+     * install that never touches it keeps exactly the spacing it had.
+     *
+     * <p>A brand-new name, never a reuse of the retired offset keys - see
+     * {@link #KEY_MOBILE_TYPE_MODE}.
      */
-    public static final String KEY_OUT_SIGNAL_OFFSET_X = "out_signal_offset_x_dp";
-    public static final String KEY_OUT_SIGNAL_OFFSET_Y = "out_signal_offset_y_dp";
+    public static final String KEY_OUT_SIGNAL_MARGIN = "out_signal_margin_dp";
     /**
      * How large a trailing "A" is drawn against the rest of the network type, as
      * a percentage.
@@ -388,11 +397,11 @@ public final class Prefs {
     public static final int DEF_OUT_TYPE_MARGIN_LEFT = 2;
     public static final int DEF_OUT_TYPE_MARGIN_RIGHT = 2;
     /**
-     * No nudge by default: the reading sits exactly where the status bar laid it
-     * out, which is the look every install already has.
+     * 2dp: the gap the reading kept from the battery before it was settable
+     * (the same value the label margins default to, since one constant served
+     * both), so the shipped spacing is unchanged.
      */
-    public static final int DEF_OUT_SIGNAL_OFFSET_X = 0;
-    public static final int DEF_OUT_SIGNAL_OFFSET_Y = 0;
+    public static final int DEF_OUT_SIGNAL_MARGIN = 2;
     /**
      * 65% for the trailing "A": the reference's {@code 56/86} ratio, measured
      * from {@code docs/ref-5ga.png}. 100 turns the shrink off.
@@ -444,14 +453,16 @@ public final class Prefs {
     public static final int MIN_OUT_TYPE_MARGIN = 0;
     public static final int MAX_OUT_TYPE_MARGIN = 16;
     /**
-     * The nudge the out-of-ring reading accepts, in dp, in either direction.
+     * The span the signal margin offers, in dp.
      *
-     * <p>Bounded at 12 so the reading cannot be walked far enough to collide
-     * with the battery on one side or leave the status bar's touchable strip on
-     * the other; the same span is offered on both axes.
+     * <p>Non-negative on purpose: unlike the retired position offset, this is a
+     * reserved gap. A negative value would mean "overlap the battery", which is
+     * the very thing the reservation exists to prevent. 0 lets the reading butt
+     * up against the battery; 16 is a comfortable separation without eating the
+     * status bar.
      */
-    public static final int MIN_OUT_SIGNAL_OFFSET = -12;
-    public static final int MAX_OUT_SIGNAL_OFFSET = 12;
+    public static final int MIN_OUT_SIGNAL_MARGIN = 0;
+    public static final int MAX_OUT_SIGNAL_MARGIN = 16;
     /**
      * The trailing "A" may be the same size as the rest (100) or a little over
      * half of it (50). Below 50 the suffix stops reading as a letter at status

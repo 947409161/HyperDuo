@@ -289,25 +289,30 @@ public final class TrioPreviewView extends View {
             return;
         }
 
-        // The position nudge is a move within the status bar row, so the cell
-        // has to be a window on that row rather than a box around the reading:
-        // it is sized to hold the reading plus the full nudge range on each
-        // side, and the reading is then drawn at its nudged offset inside it.
-        // Fitting the reading to the raw cell instead would let a large nudge
-        // push the drawing out of the cell, which reads as "no such setting".
-        final int rangeX = Math.round(Math.max(Math.abs(Prefs.MIN_OUT_SIGNAL_OFFSET),
-                Prefs.MAX_OUT_SIGNAL_OFFSET) * density);
-        final int rangeY = rangeX;
-        final int regionW = hostWidth + 2 * rangeX;
-        final int regionH = hostHeight + 2 * rangeY;
-        final float scale = Math.min(innerW / (float) regionW, innerH / (float) regionH);
+        // The margin is the reading's distance from the battery, so the cell is
+        // a window on the strip [reading][margin] with the battery standing at
+        // its right edge. The window is the reading plus the largest margin the
+        // slider offers, and the reading keeps exactly the configured gap from
+        // that edge - so the slider's whole range stays visible instead of the
+        // reading drifting out of the cell. No battery is drawn: this cell is
+        // the reading's, and adding a second piece of the status bar here would
+        // only compete with the glyph cells for the same square.
+        final float maxMarginPx = Prefs.MAX_OUT_SIGNAL_MARGIN * density;
+        final float regionW = hostWidth + maxMarginPx;
+        final float regionH = hostHeight;
+        final float scale = Math.min(innerW / regionW, innerH / regionH);
         final int drawW = Math.max(1, Math.round(hostWidth * scale));
         final int drawH = Math.max(1, Math.round(hostHeight * scale));
-        final float offX = a.outSignalOffsetX * density * scale;
-        final float offY = a.outSignalOffsetY * density * scale;
+        final float marginPx = a.outSignalMargin * density * scale;
+        final float regionWpx = regionW * scale;
+        final float regionLeft = (innerW - regionWpx) * 0.5f;
+        // The region's right edge is the battery; the reading sits `marginPx` in
+        // from it, which is what a wider gap looks like.
+        final float left = regionLeft + regionWpx - marginPx - drawW;
+        final float top = (innerH - drawH) * 0.5f;
 
         final int save = canvas.save();
-        canvas.translate((innerW - drawW) * 0.5f + offX, (innerH - drawH) * 0.5f + offY);
+        canvas.translate(left, top);
         TrioRenderer.drawOutSignal(canvas, drawW, drawH, reading[0], reading[1], foreground, a);
         canvas.restoreToCount(save);
     }

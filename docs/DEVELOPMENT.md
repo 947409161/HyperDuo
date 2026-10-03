@@ -606,13 +606,19 @@ Wi-Fi 搬进缺口仍是 canvas 变换（`translate` + `scale`）完成的，几
 把两条缝合成为**一个** strip 数字的地方（见其注释），同样按 RTL 取「朝锚点」的那条缝；只有标签
 独占时才会把外侧那条缝也算进去。
 
-**环外读数的位置偏移（`out_signal_offset_x_dp` / `_y_dp`）**：走**布局层**（在
-`placeOutTypeLabel` 的 clamp 之后把像素偏移加到 `left`/`top`），不走 `drawOutSignal` 改
-`x0`/`baseline`。两个理由：视图的测量尺寸/占位不变（偏移后不会被裁、也不会和邻居重叠），且标签
-锚在读数已偏移的 `left` 上会**自动跟着走**，两者不会脱节。`placeOutTypeLabel` 里已有的
-`setTranslationX(-islandShiftPx)` 是超级岛专用，偏移加在 `layout()` 的坐标上而非 translation，
-两者不打架。水平偏移默认 0，所以 `placeOutTypeLabel` 的三参重载保留给标签自己用（标签不带偏移，
-由读数带动）。
+**环外读数与电池的间距（`out_signal_margin_dp`）**：和标签边距一样是**会占位**的边距，不是位置。
+`reserveOutRingStrip` 把它（连同读数宽度）从原生图标行里让出来，`placeOutTypeLabel` 用它把读数
+摆在电池左侧。**这里踩过一次坑**：1.6 最初把它做成 `out_signal_offset_x_dp` / `_y_dp` 两个自由
+**位移**，加在 clamp 之后——位移不参与 strip 计算，所以调大后读数滑出为自己预留的空间，直接画在
+旁边图标上层（用户报告「不占位了，会悬浮在其他图标上方」）。结论：**这条线上的任何调节都必须是
+边距**，因为 strip 是唯一能让原生图标跟着让位的机制；自由位移没有对应的让位动作。
+**垂直方向不再提供调节**：状态栏那一行没有可预留的纵向空间，任何纵向位移只能是「压到别的东西
+上」，所以读数一律在自己那一行里垂直居中。
+
+**读数的验证**：`work/outringcheck` 的 `SuffixShot` 是后缀缩放的量测脚本——它把
+`"5GA"` 按若干比例渲染进环心、用列游程量高度比，默认 65 应落在 0.65 附近、比例 100 应与旧版
+单字号完全一致。间距本身没有独立工装：它是 `reserveOutRingStrip` 的一个加数，与标签边距走同一
+条断言路径。
 
 已知风险：原生 `mobile_type_single` 是 mobile 槽组的子级，而 `foldedSlots()` 不包含
 `mobile_type`，所以「关闭显示移动信号点 + 环外」时可能同时看到原生与自建两个标签。环内模式不会
@@ -652,8 +658,9 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 `status_bar_icon_height` 一致），结尾 A 的缩放取 `type_suffix_scale`。`out_type_size` 在设置页
 别处**没有任何可见反馈**，这一格就是它的唯一所见即所得参照；口径一旦和钩子侧不一致，预览就
 开始骗人，比没有预览更糟。信号那格同理：按 `out_signal_size_dp × density` 与参照纵横比定出
-读数尺寸，并把 `out_signal_offset_*_dp` 换算成格内的位移（格宽按「读数 + 两侧满量程偏移」定，
-否则大偏移会把读数推出格子，看起来像没有这一项）。
+读数尺寸，再把 `out_signal_margin_dp` 换算成读数到格子右边缘的距离（右边缘即电池在真实那一行里
+的位置；窗口宽 = 读数 + 滑块能给出的最大间距），所以拉大间距时读数确实向左离开边缘，整个量程都
+留在格内。
 
 `PREVIEW_SIZE = 39.dp` 是为了让八格一行放得下（8×39 + 7×4 = 340dp < 344dp）。第 7 格用了
 `"5GA"` 作为示例类型——正是为了让 `type_suffix_scale` 有可见反馈。
@@ -937,16 +944,13 @@ int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `
 **两个视图共用一条 strip**：信号与类型标签都排在电池图标左边，都以
 `reserveOutTypeSpace(container, total)` 往容器左侧撑 padding。它们各自更新时如果都按自己的宽度
 去撑，后更新的那个就会把先更新的挤掉，所以统一走 `reserveOutRingStrip(container)` —— 它读两个
-子视图的 `getMeasuredWidth()` 求和（信号在前、标签在外，间距按 `out_type_margin_left/right_dp`
-取「朝锚点」的那条缝），一次撑到位。定位用
-`placeOutTypeLabel(container, view, anchor, offsetX, offsetY)`，标签的锚点是
+子视图的 `getMeasuredWidth()` 求和，并各配自己那条**朝锚点**的缝：读数是
+`out_signal_margin_dp`，标签是 `out_type_margin_left/right_dp` 里朝向锚点的那条（另有标签独占时
+才算上的外侧那条），一次撑到位。定位用
+`placeOutTypeLabel(container, view, anchor, gap)`，第三参永远是「这个视图与锚点之间的缝」；
+标签自己用三参重载（内部取 `outLabelAnchorGap`），读数用四参传 `outSignalMargin`。标签的锚点是
 `labelAnchorIn(container, meter)`：有信号就贴在信号外侧，否则直接贴电池盒 —— 阅读顺序是
-网络类型 → 信号 → 电池，标签永远在最外。读数的位置偏移（`out_signal_offset_*_dp`）就加在
-`placeOutTypeLabel` 的坐标上，标签因此自动跟随；标签自己用三参重载（偏移为 0）。
-
-**位置偏移的验证**：`work/outringcheck` 的 `SuffixShot` 同时是后缀缩放的量测脚本——它把
-`"5GA"` 按若干比例渲染进环心，用列游程量出末段与主段的高度比，默认 65 应落在 0.65 附近、
-比例 100 应与旧版单字号完全一致。
+网络类型 → 信号 → 电池，标签永远在最外，读数与标签的间距各自独立可调。
 
 **采样时机**：环外堆叠也要分卡读数，所以 `TrioState.refresh()` 的轮询门与
 `hyperduo-signal` 里的 `pollSimsNow` 条件都从裸的 `dualSim` 放宽成
@@ -1005,8 +1009,7 @@ int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `
 | `out_type_margin_left_dp` | `2` | 0 – 16（环外标签与其**外侧**的空隙，dp；RTL 下随整行镜像） |
 | `out_type_margin_right_dp` | `2` | 0 – 16（环外标签与其**内侧**的空隙，dp；RTL 下同样镜像） |
 | `out_signal_size_dp` | `15` | 6 – 20（环外信号读数的 dp 高度；乘显示器密度成像素，**不跟随电池容器高度**，只用于环外 + 堆叠信号） |
-| `out_signal_offset_x_dp` | `0` | -12 – 12（环外读数左右偏移的 dp；正数向右，标签跟着走） |
-| `out_signal_offset_y_dp` | `0` | -12 – 12（环外读数上下偏移的 dp；正数向下，只动读数不改占位） |
+| `out_signal_margin_dp` | `2` | 0 – 16（环外读数与电池之间的**会占位**边距，dp；调大时原生图标同步让位。只用于环外 + 堆叠信号） |
 | `type_weight` | `700` | 100 – 900（环内/环外共用） |
 | `track_alpha` | `56` | 0 – 255 |
 | `debug_log` | `false` | — |

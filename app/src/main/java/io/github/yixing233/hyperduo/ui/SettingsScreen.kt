@@ -1043,35 +1043,23 @@ private fun LazyListScope.geometryTab(
                     onValueChange = { v -> update { it.setOutSignalSize(v) } },
                 )
             }
-            // Where the reading sits inside the row it was given. Same gate as
-            // its size - the nudge only has a reading to move while one is
-            // drawn - and the same four conditions, named for the hint.
+            // How far the reading stands from the battery. A reserved margin, so
+            // it moves the native icons as well as the reading - which is why it
+            // is a gap and not a position: a free position slid the reading over
+            // the icons it should have displaced. Same gate as the size, since
+            // there is only a reading to space while one is drawn.
             TooltipBox(
                 text = outSignalSizeHint.orEmpty(),
                 enabled = outSignalSizeHint != null,
             ) {
                 IntSlider(
-                    value = settings.outSignalOffsetX,
-                    min = Prefs.MIN_OUT_SIGNAL_OFFSET,
-                    max = Prefs.MAX_OUT_SIGNAL_OFFSET,
-                    title = stringResource(R.string.out_signal_offset_x_title),
-                    summary = stringResource(R.string.out_signal_offset_x_summary),
+                    value = settings.outSignalMargin,
+                    min = Prefs.MIN_OUT_SIGNAL_MARGIN,
+                    max = Prefs.MAX_OUT_SIGNAL_MARGIN,
+                    title = stringResource(R.string.out_signal_margin_title),
+                    summary = stringResource(R.string.out_signal_margin_summary),
                     enabled = a.stackedOut(),
-                    onValueChange = { v -> update { it.setOutSignalOffsetX(v) } },
-                )
-            }
-            TooltipBox(
-                text = outSignalSizeHint.orEmpty(),
-                enabled = outSignalSizeHint != null,
-            ) {
-                IntSlider(
-                    value = settings.outSignalOffsetY,
-                    min = Prefs.MIN_OUT_SIGNAL_OFFSET,
-                    max = Prefs.MAX_OUT_SIGNAL_OFFSET,
-                    title = stringResource(R.string.out_signal_offset_y_title),
-                    summary = stringResource(R.string.out_signal_offset_y_summary),
-                    enabled = a.stackedOut(),
-                    onValueChange = { v -> update { it.setOutSignalOffsetY(v) } },
+                    onValueChange = { v -> update { it.setOutSignalMargin(v) } },
                 )
             }
             // The weight still applies in both positions.

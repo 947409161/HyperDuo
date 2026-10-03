@@ -44,15 +44,14 @@
 | 5GA 中 A 的比例 | `type_suffix_scale` | 第十一轮（见 6.9） | `:368`（矩形）、`:783`、`:799`（环内分段绘制） | `:2031`（环外 `RelativeSizeSpan`）|
 | 环外类型左边距 | `out_type_margin_left_dp` | 第十一轮 | 不读 | `placeOutTypeLabel` / `reserveOutRingStrip` |
 | 环外类型右边距 | `out_type_margin_right_dp` | 第十一轮 | 不读 | 同上 |
-| 环外信号水平位置 | `out_signal_offset_x_dp` | 第十一轮 | `TrioPreviewView.drawOutSignal` | `updateOutSignal` / `refreshOutSignal` |
-| 环外信号垂直位置 | `out_signal_offset_y_dp` | 第十一轮 | 同上 | 同上 |
+| 环外信号间距 | `out_signal_margin_dp` | 第十一轮（1.6.1 起） | `TrioPreviewView.drawOutSignal` | `placeOutTypeLabel` / `reserveOutRingStrip` |
 | 网络类型字重 | `type_weight` | `:842-853` | `:361`、`:585`、`:601` | `:1946`（环外标签用它）|
 | 底纹浓度 | `track_alpha` | `:854-862` | `:285`、`:311`、`:411`、`:518` | 不读 |
 | 调试日志 | `debug_log` | `:950-958` | 不读 | `:80-82` |
 
 **第一个整体印象**（下面的分类是**第十轮之前的快照**，那之后 `signal_mode`、`stacked_signal`、`data_sim_only`、`out_signal_size` 等键加入，第十一轮又加了 5 个；这里保留原文的分类结构，只在末尾补上本轮新键的归属）：
 
-- **两侧都读**：`show_wifi`、`show_mobile`、`show_value`、`show_bolt`、`mobile_type_mode`、`ring_stroke`、`arc_stroke`、`value_size`、`type_weight`，加上本轮加入的 `type_suffix_scale`（环内分段绘制、环外 `RelativeSizeSpan`）与两个环外偏移 `out_signal_offset_x_dp` / `out_signal_offset_y_dp`（`TrioHooks` 定位 + `TrioPreviewView` 预览）。
+- **两侧都读**：`show_wifi`、`show_mobile`、`show_value`、`show_bolt`、`mobile_type_mode`、`ring_stroke`、`arc_stroke`、`value_size`、`type_weight`，加上本轮加入的 `type_suffix_scale`（环内分段绘制、环外 `RelativeSizeSpan`）与 `out_signal_margin_dp`（`TrioHooks` 定位/占位 + `TrioPreviewView` 预览）。
 - **只有渲染侧读**：`trio_style`、`swap_wifi_value`、`track_alpha`、`value_weight`、`type_size`、`role_colors`、六个 `color_*`、`low_threshold`（第十轮后的 `out_signal_size` 也属此类）。
 - **只有 Hook 侧读**：`enabled`、`out_type_size`、`debug_log`（`TrioConfig.debugLog()`，`TrioHooks.java:80-81`），加上本轮的两个环外标签边距 `out_type_margin_left_dp` / `out_type_margin_right_dp`。
 
@@ -136,7 +135,7 @@ final boolean valueInCentre = hasValue && (centred || (!wifi && !typeInRing));
 
 ### 2.6 预览盖不住所有东西，写入路径有三条
 
-预览（`PreviewCard` `:1163-1196`）走 `TrioPreviewView` → `TrioRenderer.drawInto`，和状态栏共用同一份渲染代码，这点是好的。但它有盲区：**环外网络类型不是 `TrioRenderer` 画的**，而是 `TrioHooks` 挂的一个 `OutTypeLabel` TextView（`TrioHooks.java:1697-1704`）。所以 `out_type_size` 这个滑块在设置页里**永远没有任何可见反馈**，用户只能切回状态栏看。（**这条盲区已在第 6.4 / 6.9 节补上**：预览末两格分别画环外标签与环外读数，第 7 格在第十一轮起用 `"5GA"` 示例，于是 `out_type_size`、`out_type_margin_*`、`type_suffix_scale`、`out_signal_size`、`out_signal_offset_*` 都有可见反馈。）
+预览（`PreviewCard` `:1163-1196`）走 `TrioPreviewView` → `TrioRenderer.drawInto`，和状态栏共用同一份渲染代码，这点是好的。但它有盲区：**环外网络类型不是 `TrioRenderer` 画的**，而是 `TrioHooks` 挂的一个 `OutTypeLabel` TextView（`TrioHooks.java:1697-1704`）。所以 `out_type_size` 这个滑块在设置页里**永远没有任何可见反馈**，用户只能切回状态栏看。（**这条盲区已在第 6.4 / 6.9 节补上**：预览末两格分别画环外标签与环外读数，第 7 格在第十一轮起用 `"5GA"` 示例，于是 `out_type_size`、`out_type_margin_*`、`type_suffix_scale`、`out_signal_size`、`out_signal_margin_dp` 都有可见反馈。）
 
 写入路径有三条而不是一条：标准 `writeBoolean`/`writeInt`（`SettingsRepository.kt:147-157`）、手写的 `resetRoleColors`（`:66-84`，6 个键 commit 一遍再统一 push + 广播）、以及整表推送的 `syncAllToFramework`（`:111-145`，服务绑定后把本地全部值推给框架）。三条都必须记得「push → notifyModule」，而 `notifyModule`（`:173-180`）的载荷恒为全量按键打包。
 
@@ -438,13 +437,16 @@ final float scale = Math.min(width / inkW, height / outSignalInkH(dotRow));
 - 键 `out_type_margin_left_dp` / `out_type_margin_right_dp`，int dp，默认都 `2`（= 原硬编码常量 `OUT_LABEL_GAP_DP`，所以老安装外观不变），范围 `0..16`。
 - **语义按物理左右、不按阅读顺序**：条带在 LTR 下是 `[标签] --右缝-- [读数] --右缝-- [电池]`，标签的**外侧**对着原生图标行、**内侧**对着读数（或电池）。RTL 下整行镜像，两条缝互换物理方向，所以 `placeOutTypeLabel` LTR 用右缝（`anchor.getLeft() - right - width`）、RTL 用左缝（`anchor.getRight() + left`）。
 - **必须在一个地方合成**：strip 是**一个** padding 数字（`reserveOutRingStrip`），两条缝在这里按 RTL 取「朝锚点」的那条算出 total；只有标签独占（没有读数）时把外侧那条缝也算进去。分别 reserve 会让后更新的那个把先更新的挤掉。
-- 原来的单值 `outLabelGap(container)` 拆成 `outLabelMargins(container)`（返回 dp→px 的 `{左, 右}`）与 `outLabelGap(container, rtl)`；dp→px 与 `outSignalHeight` 同法，取显示器密度而非状态栏行高。
+- 原来的单值 `outLabelGap(container)` 拆成 `outLabelMargins(container)`（返回 dp→px 的 `{左, 右}`）与 `outLabelAnchorGap(container)`（取朝锚点的那条）；dp→px 与 `outSignalHeight` 同法，取显示器密度而非状态栏行高。
 
-**二、环外信号读数的上下 + 左右位置**
+**二、环外信号读数与电池的间距（1.6.1 修正，取代 1.6 的两个位置偏移）**
 
-- 键 `out_signal_offset_x_dp` / `out_signal_offset_y_dp`，int dp，默认 `0`，范围 `-12..12`。
-- **走布局层，不走 `drawOutSignal` 的 `x0`/`baseline`**。三个理由：视图测量尺寸/占位不变（偏移后不会被裁、也不会与邻居重叠，避免了路径 B 的坑）；标签锚在读数**已偏移的** `left` 上会自动跟随，两者不会脱节；水平偏移若走 `translationX` 会与 `placeOutTypeLabel` 里超级岛的 `setTranslationX(-islandShiftPx)` 互相覆盖，而走 `layout()` 坐标则完全不冲突。偏移加在 clamp **之后**——clamp 保默认态在行内，偏移是用户明确要的，就给他。
-- `placeOutTypeLabel` 增开四参重载（带 `offsetX/offsetY`），三参重载保留给标签自己（标签不带偏移，由读数带动）；工作台的文本 pin 锚的正是三参那两处标签调用，因此不受影响。
+- **1.6 的原案（已废弃）**：`out_signal_offset_x_dp` / `out_signal_offset_y_dp`，走布局层把像素偏移加在 `placeOutTypeLabel` 的 clamp 之后。
+- **上线后用户报告**：「环外信号现在存在占位问题，现在不占位了，会悬浮在其他图标上方」——位移**不参与 strip 计算**（`reserveOutRingStrip` 只按 `getMeasuredWidth()` 求和），所以调大后读数滑出为自己预留的空间、直接画在邻居图标上层。
+- **修正**：键改为 `out_signal_margin_dp`，int dp，默认 `2`（= 原来写死的 `OUT_LABEL_GAP_DP`，升级不变样），范围 `0..16`。它是**会占位**的边距，和标签边距走同一条路径：`reserveOutRingStrip` 把它连同读数宽度一起让出来，`placeOutTypeLabel` 用它定位。
+- **垂直方向不再提供**：状态栏那一行没有可预留的纵向空间，任何纵向位移都只能是「压到别的东西上」，所以读数一律在行内垂直居中。
+- `placeOutTypeLabel` 第三参从 `(offsetX, offsetY)` 改成**单个 `gap`**——「这个视图与锚点之间的缝」；三参重载保留给标签（内部取 `outLabelAnchorGap`），读数用四参传 `outSignalMargin`。工作台的文本 pin 锚的正是三参那两处标签调用，因此不受影响。
+- **通用教训**：这条线上的任何调节都必须是**边距**，不能是自由位移——strip 是唯一能让原生图标跟着让位的机制。
 
 **三、「5GA」里的 A 相对主字号缩小**
 
@@ -457,8 +459,8 @@ final float scale = Math.min(width / inkW, height / outSignalInkH(dotRow));
 
 **四、门禁与预览**
 
-- 新滑杆的 `enabled` 都复用既有谓词，且**提示链不含自身**（6.7 二的规则）：类型边距与 A 比例用 `a.typeOutOfRing` / `a.typeAnywhere()`，信号两个偏移用 `a.stackedOut()`（与 `out_signal_size` 同一条提示链）。
-- 预览第 7 格的示例类型由 `"5G"` 改为 **`"5GA"`**，正是为了让 A 比例有可见反馈；`TrioPreviewView.drawOutTypeLabel` 同步走两段绘制。第 8 格把 `out_signal_offset_*_dp` 换算成格内位移，格宽按「读数 + 两侧满量程偏移」定——否则大偏移会把读数推出格子，看起来像没这一项。
+- 新滑杆的 `enabled` 都复用既有谓词，且**提示链不含自身**（6.7 二的规则）：类型边距与 A 比例用 `a.typeOutOfRing` / `a.typeAnywhere()`，信号间距用 `a.stackedOut()`（与 `out_signal_size` 同一条提示链）。
+- 预览第 7 格的示例类型由 `"5G"` 改为 **`"5GA"`**，正是为了让 A 比例有可见反馈；`TrioPreviewView.drawOutTypeLabel` 同步走两段绘制。第 8 格把 `out_signal_margin_dp` 换算成读数到格子右边缘的距离（右边缘即电池在真实那一行的位置，窗口宽 = 读数 + 滑块上限），所以拉大间距时读数确实向左离开边缘，整个量程都留在格内。
 - 顺手清掉了 `TrioPreviewView` 里声明未用的陈旧常量 `OUT_LABEL_GAP_DP`（它的 javadoc 还自称是 `TrioHooks.OUT_LABEL_GAP_DP` 的镜像，而后者已经不存在）。
 
 **五、验证**
@@ -467,3 +469,12 @@ final float scale = Math.min(width / inkW, height / outSignalInkH(dotRow));
 - `work/outringcheck/SuffixShot` 新增，量出 A/主字高度比随比例单调，65 → 0.625。
 - Gradle `:app:assembleDebug --offline` `BUILD SUCCESSFUL`。
 - **未做**：设备端两条实证（环外读数尺寸不随下拉变大、仅显示上网卡实时生效）——写出本轮时 `adb devices -l` 仍是 `192.168.1.148:44453 offline`。
+
+### 6.10 1.6.1：环外信号间距取代位置偏移
+
+1.6 发布后用户立即报告：**「环外信号现在存在占位问题，现在不占位了，会悬浮在其他图标上方，似乎是调节的参数导致的，应该不用位置来做调节了，而是边距」**——诊断完全正确。改动见上方 6.9 二；这里记结论与教训：
+
+- **根因**：位置偏移不参与 `reserveOutRingStrip` 的占位计算，所以它能把读数移出预留区、叠到邻居图标上。边距之所以没这个问题，正因为它是被预留的那个数字。
+- **键的迁移**：`out_signal_offset_x_dp` / `out_signal_offset_y_dp` **不迁移**到新键。理由有二：偏移的语义（自由移动）与边距（占位间隙）不同，无法一一映射；且这两个键只在 1.6 存在了一天、默认值为 `0`，绝大多数安装从未写过它们。装了 1.6 又恰好调过偏移的用户，升级后回到默认间距 `2dp`（= 1.6 之前的出厂外观），不会更差。
+- **默认值取 2dp 而非 0**：老 `OUT_LABEL_GAP_DP` 常量、以及 1.6 之前所有版本的读数间距都是 2dp，取 0 会让升级后读数贴到电池上，是外观回退。
+

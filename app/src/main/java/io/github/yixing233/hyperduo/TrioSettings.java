@@ -126,9 +126,12 @@ public final class TrioSettings {
      */
     public int outTypeMarginLeft;
     public int outTypeMarginRight;
-    /** Nudge applied to the out-of-ring reading's frame, in dp: x right, y down. */
-    public int outSignalOffsetX;
-    public int outSignalOffsetY;
+    /**
+     * The gap between the out-of-ring reading and the battery, in dp. A reserved
+     * margin, not a position: widening it also pushes the native icon row over
+     * by the same amount, so the reading can never end up on top of the icons.
+     */
+    public int outSignalMargin;
     /**
      * Scale of a trailing "A" in the network type, as a percentage of the main
      * size. 100 means no shrink; the reference "5GA" is 65.
@@ -173,8 +176,7 @@ public final class TrioSettings {
         s.outSignalSize = Prefs.DEF_OUT_SIGNAL_SIZE;
         s.outTypeMarginLeft = Prefs.DEF_OUT_TYPE_MARGIN_LEFT;
         s.outTypeMarginRight = Prefs.DEF_OUT_TYPE_MARGIN_RIGHT;
-        s.outSignalOffsetX = Prefs.DEF_OUT_SIGNAL_OFFSET_X;
-        s.outSignalOffsetY = Prefs.DEF_OUT_SIGNAL_OFFSET_Y;
+        s.outSignalMargin = Prefs.DEF_OUT_SIGNAL_MARGIN;
         s.typeSuffixScale = Prefs.DEF_TYPE_SUFFIX_SCALE;
         s.typeWeight = Prefs.DEF_TYPE_WEIGHT;
         s.trackAlpha = Prefs.DEF_TRACK_ALPHA;
@@ -243,12 +245,9 @@ public final class TrioSettings {
         s.outTypeMarginRight = Prefs.clamp(
                 p.getInt(Prefs.KEY_OUT_TYPE_MARGIN_RIGHT, Prefs.DEF_OUT_TYPE_MARGIN_RIGHT),
                 Prefs.MIN_OUT_TYPE_MARGIN, Prefs.MAX_OUT_TYPE_MARGIN);
-        s.outSignalOffsetX = Prefs.clamp(
-                p.getInt(Prefs.KEY_OUT_SIGNAL_OFFSET_X, Prefs.DEF_OUT_SIGNAL_OFFSET_X),
-                Prefs.MIN_OUT_SIGNAL_OFFSET, Prefs.MAX_OUT_SIGNAL_OFFSET);
-        s.outSignalOffsetY = Prefs.clamp(
-                p.getInt(Prefs.KEY_OUT_SIGNAL_OFFSET_Y, Prefs.DEF_OUT_SIGNAL_OFFSET_Y),
-                Prefs.MIN_OUT_SIGNAL_OFFSET, Prefs.MAX_OUT_SIGNAL_OFFSET);
+        s.outSignalMargin = Prefs.clamp(
+                p.getInt(Prefs.KEY_OUT_SIGNAL_MARGIN, Prefs.DEF_OUT_SIGNAL_MARGIN),
+                Prefs.MIN_OUT_SIGNAL_MARGIN, Prefs.MAX_OUT_SIGNAL_MARGIN);
         s.typeSuffixScale = Prefs.clamp(
                 p.getInt(Prefs.KEY_TYPE_SUFFIX_SCALE, Prefs.DEF_TYPE_SUFFIX_SCALE),
                 Prefs.MIN_TYPE_SUFFIX_SCALE, Prefs.MAX_TYPE_SUFFIX_SCALE);
@@ -339,8 +338,7 @@ public final class TrioSettings {
         s.outSignalSize = outSignalSize;
         s.outTypeMarginLeft = outTypeMarginLeft;
         s.outTypeMarginRight = outTypeMarginRight;
-        s.outSignalOffsetX = outSignalOffsetX;
-        s.outSignalOffsetY = outSignalOffsetY;
+        s.outSignalMargin = outSignalMargin;
         s.typeSuffixScale = typeSuffixScale;
         s.typeWeight = typeWeight;
         s.trackAlpha = trackAlpha;
@@ -396,8 +394,7 @@ public final class TrioSettings {
             case Prefs.KEY_OUT_SIGNAL_SIZE: outSignalSize = src.outSignalSize; return true;
             case Prefs.KEY_OUT_TYPE_MARGIN_LEFT: outTypeMarginLeft = src.outTypeMarginLeft; return true;
             case Prefs.KEY_OUT_TYPE_MARGIN_RIGHT: outTypeMarginRight = src.outTypeMarginRight; return true;
-            case Prefs.KEY_OUT_SIGNAL_OFFSET_X: outSignalOffsetX = src.outSignalOffsetX; return true;
-            case Prefs.KEY_OUT_SIGNAL_OFFSET_Y: outSignalOffsetY = src.outSignalOffsetY; return true;
+            case Prefs.KEY_OUT_SIGNAL_MARGIN: outSignalMargin = src.outSignalMargin; return true;
             case Prefs.KEY_TYPE_SUFFIX_SCALE: typeSuffixScale = src.typeSuffixScale; return true;
             case Prefs.KEY_TYPE_WEIGHT: typeWeight = src.typeWeight; return true;
             case Prefs.KEY_TRACK_ALPHA: trackAlpha = src.trackAlpha; return true;
@@ -474,12 +471,9 @@ public final class TrioSettings {
         s.outTypeMarginRight = Prefs.clamp(
                 bundle.getInt(Prefs.KEY_OUT_TYPE_MARGIN_RIGHT, Prefs.DEF_OUT_TYPE_MARGIN_RIGHT),
                 Prefs.MIN_OUT_TYPE_MARGIN, Prefs.MAX_OUT_TYPE_MARGIN);
-        s.outSignalOffsetX = Prefs.clamp(
-                bundle.getInt(Prefs.KEY_OUT_SIGNAL_OFFSET_X, Prefs.DEF_OUT_SIGNAL_OFFSET_X),
-                Prefs.MIN_OUT_SIGNAL_OFFSET, Prefs.MAX_OUT_SIGNAL_OFFSET);
-        s.outSignalOffsetY = Prefs.clamp(
-                bundle.getInt(Prefs.KEY_OUT_SIGNAL_OFFSET_Y, Prefs.DEF_OUT_SIGNAL_OFFSET_Y),
-                Prefs.MIN_OUT_SIGNAL_OFFSET, Prefs.MAX_OUT_SIGNAL_OFFSET);
+        s.outSignalMargin = Prefs.clamp(
+                bundle.getInt(Prefs.KEY_OUT_SIGNAL_MARGIN, Prefs.DEF_OUT_SIGNAL_MARGIN),
+                Prefs.MIN_OUT_SIGNAL_MARGIN, Prefs.MAX_OUT_SIGNAL_MARGIN);
         s.typeSuffixScale = Prefs.clamp(
                 bundle.getInt(Prefs.KEY_TYPE_SUFFIX_SCALE, Prefs.DEF_TYPE_SUFFIX_SCALE),
                 Prefs.MIN_TYPE_SUFFIX_SCALE, Prefs.MAX_TYPE_SUFFIX_SCALE);
@@ -552,8 +546,7 @@ public final class TrioSettings {
         b.putInt(Prefs.KEY_OUT_SIGNAL_SIZE, outSignalSize);
         b.putInt(Prefs.KEY_OUT_TYPE_MARGIN_LEFT, outTypeMarginLeft);
         b.putInt(Prefs.KEY_OUT_TYPE_MARGIN_RIGHT, outTypeMarginRight);
-        b.putInt(Prefs.KEY_OUT_SIGNAL_OFFSET_X, outSignalOffsetX);
-        b.putInt(Prefs.KEY_OUT_SIGNAL_OFFSET_Y, outSignalOffsetY);
+        b.putInt(Prefs.KEY_OUT_SIGNAL_MARGIN, outSignalMargin);
         b.putInt(Prefs.KEY_TYPE_SUFFIX_SCALE, typeSuffixScale);
         b.putInt(Prefs.KEY_TYPE_WEIGHT, typeWeight);
         b.putInt(Prefs.KEY_TRACK_ALPHA, trackAlpha);

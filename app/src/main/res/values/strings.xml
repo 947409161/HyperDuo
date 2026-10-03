@@ -57,11 +57,8 @@
     <string name="out_signal_size_title">环外信号大小</string>
     <string name="out_signal_size_summary">环外读数的整体高度，单位为 dp（会随屏幕密度自动换算成像素）。15dp 与状态栏原生信号图标同高，也是默认值；可调范围 6–20dp。无论有没有下方圆点排，同一行都按同一大小绘制，两种形状不会一大一小。下拉控制中心不会改变它。</string>
 
-    <string name="out_signal_offset_x_title">环外信号水平位置</string>
-    <string name="out_signal_offset_x_summary">环外读数在状态栏里左右移动的距离，单位为 dp，正数向右。默认 0dp，可调范围 -12–12dp。环外网络类型标签贴在读数外侧，会跟着一起移动。</string>
-
-    <string name="out_signal_offset_y_title">环外信号垂直位置</string>
-    <string name="out_signal_offset_y_summary">环外读数在状态栏里上下移动的距离，单位为 dp，正数向下。默认 0dp，可调范围 -12–12dp。只影响读数自己，不改变它的高度与占位。</string>
+    <string name="out_signal_margin_title">环外信号间距</string>
+    <string name="out_signal_margin_summary">环外读数与电池图标之间的空隙，单位为 dp。默认 2dp，可调范围 0–16dp。这是一条会被占位的边距：调大时读数远离电池，同时原生图标整体让出同样宽度，所以读数永远不会压到旁边的图标上。读数本身的高矮由上面的「环外信号大小」决定，不需要再单独调位置。</string>
 
     <string name="value_centre_title">电量数字居中</string>
     <string name="value_centre_summary">电量数字放大到圆环中间并始终优先占据圆心。Wi-Fi 弧缩到顶部缺口，充电时改用小的闪电占用缺口（此时不画 Wi-Fi 弧），环内的网络类型也让位到缺口。</string>
