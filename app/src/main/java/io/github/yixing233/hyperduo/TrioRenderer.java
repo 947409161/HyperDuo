@@ -367,10 +367,8 @@ final class TrioRenderer {
     private static void drawRectType(Canvas c, String type, int fg, TrioAppearance a) {
         final float requested = a.typeSize * TrioGeometry.RECT_TYPE_SCALE;
         applyWeight(a.typeWeight);
-        final float size = fitSize(type, requested, TrioGeometry.RECT_TEXT_CLEAR);
-        TEXT.setTextSize(size);
-        TEXT.setColor(fg);
-        c.drawText(type, TrioGeometry.RECT_VALUE_X, TrioGeometry.RECT_TYPE_BASELINE, TEXT);
+        final float size = fitSize(type, requested, TrioGeometry.RECT_TEXT_CLEAR, a.typeSuffixScale);
+        drawType(c, type, TrioGeometry.RECT_VALUE_X, TrioGeometry.RECT_TYPE_BASELINE, size, fg, a);
     }
 
     /** The percentage, in the middle of the arrangement and at its own scale. */
@@ -783,10 +781,8 @@ final class TrioRenderer {
         final float requested = a.typeSize;
         final float clear = TrioGeometry.centreClearWidth(requested, a.ringStroke);
         applyWeight(a.typeWeight);
-        final float size = fitSize(type, requested, clear);
-        TEXT.setTextSize(size);
-        TEXT.setColor(fg);
-        c.drawText(type, TrioGeometry.VALUE_X, TrioGeometry.centerBaseline(size), TEXT);
+        final float size = fitSize(type, requested, clear, a.typeSuffixScale);
+        drawType(c, type, TrioGeometry.VALUE_X, TrioGeometry.centerBaseline(size), size, fg, a);
     }
 
     /**
@@ -799,10 +795,56 @@ final class TrioRenderer {
         final float requested = a.typeSize;
         final float clear = TrioGeometry.gapClearWidth(a.ringStroke);
         applyWeight(a.typeWeight);
-        final float size = fitSize(type, requested, clear);
-        TEXT.setTextSize(size);
+        final float size = fitSize(type, requested, clear, a.typeSuffixScale);
+        drawType(c, type, TrioGeometry.VALUE_X, TrioGeometry.gapBaseline(size), size, fg, a);
+    }
+
+    /**
+     * Draws the network type at {@code x} on {@code baseline}, shrinking the
+     * trailing "A" when the user asked for it.
+     *
+     * <p>{@code Canvas.drawText(CharSequence, ...)} does <em>not</em> apply
+     * spans - only a {@code TextPaint} through {@code StaticLayout} does - so
+     * the two sizes are drawn as two runs. The {@link Paint} is left aligned for
+     * the duration: {@link #TEXT} is centred, and centring each run separately
+     * would stack them on the same spot instead of setting them side by side.
+     *
+     * <p>The suffix shares the main run's baseline, which is what puts its foot
+     * on the same line as the "5G" rather than dropping it into the ring.
+     *
+     * @param x the centre of the whole label: the single-run path passes it
+     *          straight to a centred {@link Paint}, and the two-run path uses it
+     *          to centre the block it composes
+     */
+    private static void drawType(Canvas c, String type, float x, float baseline,
+                                 float size, int fg, TrioAppearance a) {
+        if (!TrioGeometry.hasShrunkSuffix(type, a.typeSuffixScale)) {
+            TEXT.setTextAlign(Paint.Align.CENTER);
+            TEXT.setTextSize(size);
+            TEXT.setColor(fg);
+            c.drawText(type, x, baseline, TEXT);
+            return;
+        }
+        final String base = TrioGeometry.typeBase(type);
+        final String suffix = String.valueOf(TrioGeometry.TYPE_SUFFIX);
+        final float suffixSize = size * a.typeSuffixScale / 100f;
+        // Measure both runs, then place them as one centred block: total width
+        // is the layout, and the label's own centre is what stays put.
+        TEXT.setTextAlign(Paint.Align.LEFT);
         TEXT.setColor(fg);
-        c.drawText(type, TrioGeometry.VALUE_X, TrioGeometry.gapBaseline(size), TEXT);
+        TEXT.setTextSize(size);
+        final float baseWidth = TEXT.measureText(base);
+        TEXT.setTextSize(suffixSize);
+        final float suffixWidth = TEXT.measureText(suffix);
+        float left = x - (baseWidth + suffixWidth) * 0.5f;
+        TEXT.setTextSize(size);
+        c.drawText(base, left, baseline, TEXT);
+        left += baseWidth;
+        TEXT.setTextSize(suffixSize);
+        c.drawText(suffix, left, baseline, TEXT);
+        // Restore the shared paint's centred default: every other text draw in
+        // this renderer relies on it, and this method is not the last per frame.
+        TEXT.setTextAlign(Paint.Align.CENTER);
     }
 
     /**
@@ -831,15 +873,46 @@ final class TrioRenderer {
      * long value shrinks instead of overrunning the ring.
      */
     private static float fitSize(String text, float requested, float clearWidth) {
+        return fitSize(text, requested, clearWidth, 100);
+    }
+
+    /**
+     * The same fit, measuring the label the way {@link #drawType} will lay it
+     * out: a shrunk trailing "A" carries only {@code scalePercent} of the main
+     * size, so it takes less room and the main run is left correspondingly
+     * larger. Measuring the whole string at {@code requested} would shrink a
+     * label that in fact fits.
+     */
+    private static float fitSize(String text, float requested, float clearWidth,
+                                 int scalePercent) {
         if (clearWidth <= 0f) {
             return requested;
         }
         TEXT.setTextSize(requested);
-        final float width = TEXT.measureText(text);
+        final float width = measureType(text, requested, scalePercent);
         if (width <= clearWidth || width <= 0f) {
             return requested;
         }
         return requested * (clearWidth / width);
+    }
+
+    /**
+     * Width of {@code text} at {@code size}, with the trailing suffix scaled.
+     *
+     * <p>Leaves {@link #TEXT} at {@code size}, which is what every caller wants
+     * next: {@link #fitSize} returns and the draw path re-sets the size anyway.
+     */
+    private static float measureType(String text, float size, int scalePercent) {
+        if (!TrioGeometry.hasShrunkSuffix(text, scalePercent)) {
+            TEXT.setTextSize(size);
+            return TEXT.measureText(text);
+        }
+        TEXT.setTextSize(size);
+        final float base = TEXT.measureText(TrioGeometry.typeBase(text));
+        TEXT.setTextSize(size * scalePercent / 100f);
+        final float suffix = TEXT.measureText(String.valueOf(TrioGeometry.TYPE_SUFFIX));
+        TEXT.setTextSize(size);
+        return base + suffix;
     }
 
     // ----------------------------------------------------------------- helpers

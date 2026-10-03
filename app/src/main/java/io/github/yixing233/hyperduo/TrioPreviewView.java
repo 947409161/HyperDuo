@@ -53,15 +53,6 @@ public final class TrioPreviewView extends View {
      */
     private static final float HOST_ICON_HEIGHT_DP = 20f;
 
-    /**
-     * Gap between the glyph's box and the out-of-ring label, in density pixels.
-     *
-     * <p>Mirrors {@code TrioHooks.OUT_LABEL_GAP_DP}, which is the gap the status
-     * bar uses; that class touches the Xposed API and is deliberately not
-     * referenced from this one.
-     */
-    private static final float OUT_LABEL_GAP_DP = 2f;
-
     public TrioPreviewView(Context context) {
         super(context);
     }
@@ -218,19 +209,44 @@ public final class TrioPreviewView extends View {
         labelPaint.setTypeface(TrioRenderer.typefaceFor(a.typeWeight));
         labelPaint.setTextAlign(Paint.Align.CENTER);
         labelPaint.setTextScaleX(1f);
-        labelPaint.setTextSize(innerH * a.outTypeSize / hostHeight);
+        final float size = innerH * a.outTypeSize / hostHeight;
+        labelPaint.setTextSize(size);
+
+        // Shrink the trailing "A" the way the status bar label does, and the way
+        // the ring canvas does not have to: this preview draws with a Paint, so
+        // it takes the same two-run path TrioRenderer.drawType takes rather than
+        // a span.
+        final boolean shrunk = TrioGeometry.hasShrunkSuffix(mobileType, a.typeSuffixScale);
+        final String base = shrunk ? TrioGeometry.typeBase(mobileType) : mobileType;
+        final String suffix = shrunk ? String.valueOf(TrioGeometry.TYPE_SUFFIX) : "";
+        final float suffixSize = size * a.typeSuffixScale / 100f;
+        final float baseWidth = labelPaint.measureText(base);
+        labelPaint.setTextSize(suffixSize);
+        final float suffixWidth = labelPaint.measureText(suffix);
+        final float width = baseWidth + suffixWidth;
         // On screen the label is wrap-content beside the icon box, so nothing
         // trims it; this cell is a square and would. Squeeze a too-wide glyph
         // horizontally instead of letting the view bounds cut it off. The height
         // is left exact - that is the dimension outTypeSize actually sets.
-        final float width = labelPaint.measureText(mobileType);
-        if (width > innerW) {
-            labelPaint.setTextScaleX(innerW / width);
-        }
+        final float scaleX = (width > innerW && width > 0f) ? innerW / width : 1f;
+        labelPaint.setTextScaleX(scaleX);
 
         final Paint.FontMetrics metrics = labelPaint.getFontMetrics();
         final float baseline = innerH * 0.5f - (metrics.ascent + metrics.descent) * 0.5f;
-        canvas.drawText(mobileType, innerW * 0.5f, baseline, labelPaint);
+        // One centred block: the label's own centre stays put while the suffix
+        // hangs smaller off its right. Centred on the *scaled* width, because
+        // setTextScaleX scales the advances the runs are placed by.
+        final float scaledWidth = width * scaleX;
+        float left = innerW * 0.5f - scaledWidth * 0.5f;
+        labelPaint.setTextSize(size);
+        labelPaint.setTextAlign(Paint.Align.LEFT);
+        canvas.drawText(base, left, baseline, labelPaint);
+        if (shrunk) {
+            left += baseWidth * scaleX;
+            labelPaint.setTextSize(suffixSize);
+            canvas.drawText(suffix, left, baseline, labelPaint);
+        }
+        labelPaint.setTextAlign(Paint.Align.CENTER);
     }
 
     /**
@@ -272,12 +288,26 @@ public final class TrioPreviewView extends View {
         if (hostWidth <= 0) {
             return;
         }
-        final float scale = Math.min(innerW / (float) hostWidth, innerH / (float) hostHeight);
+
+        // The position nudge is a move within the status bar row, so the cell
+        // has to be a window on that row rather than a box around the reading:
+        // it is sized to hold the reading plus the full nudge range on each
+        // side, and the reading is then drawn at its nudged offset inside it.
+        // Fitting the reading to the raw cell instead would let a large nudge
+        // push the drawing out of the cell, which reads as "no such setting".
+        final int rangeX = Math.round(Math.max(Math.abs(Prefs.MIN_OUT_SIGNAL_OFFSET),
+                Prefs.MAX_OUT_SIGNAL_OFFSET) * density);
+        final int rangeY = rangeX;
+        final int regionW = hostWidth + 2 * rangeX;
+        final int regionH = hostHeight + 2 * rangeY;
+        final float scale = Math.min(innerW / (float) regionW, innerH / (float) regionH);
         final int drawW = Math.max(1, Math.round(hostWidth * scale));
         final int drawH = Math.max(1, Math.round(hostHeight * scale));
+        final float offX = a.outSignalOffsetX * density * scale;
+        final float offY = a.outSignalOffsetY * density * scale;
 
         final int save = canvas.save();
-        canvas.translate((innerW - drawW) * 0.5f, (innerH - drawH) * 0.5f);
+        canvas.translate((innerW - drawW) * 0.5f + offX, (innerH - drawH) * 0.5f + offY);
         TrioRenderer.drawOutSignal(canvas, drawW, drawH, reading[0], reading[1], foreground, a);
         canvas.restoreToCount(save);
     }

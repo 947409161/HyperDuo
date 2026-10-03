@@ -122,6 +122,36 @@ final class TrioGeometry {
     static final float VALUE_LETTER_SPACING = -0.04f;
 
     /**
+     * The character the reference draws smaller than the rest of the network
+     * type: the "A" of "5GA".
+     *
+     * <p>Kept here rather than in either drawing path so the ring canvas and the
+     * out-of-ring label cannot end up disagreeing about which glyph is the
+     * suffix. MIUI reports the type as one string ("5G", "5GA"), so the only
+     * signal available is the trailing character.
+     */
+    static final char TYPE_SUFFIX = 'A';
+
+    /**
+     * Whether {@code type} ends in a suffix that should be drawn smaller.
+     *
+     * <p>Both conditions matter: {@code scalePercent} of 100 is "no shrink", and
+     * a bare "A" is the whole label rather than a suffix of one - shrinking it
+     * would just draw the label smaller, which is what the size slider is for.
+     */
+    static boolean hasShrunkSuffix(String type, int scalePercent) {
+        return scalePercent < 100
+                && type != null
+                && type.length() > 1
+                && type.charAt(type.length() - 1) == TYPE_SUFFIX;
+    }
+
+    /** {@code type} without its trailing {@link #TYPE_SUFFIX}. */
+    static String typeBase(String type) {
+        return type.substring(0, type.length() - 1);
+    }
+
+    /**
      * Vertical centre of the ring interior. The level is drawn here once the
      * Wi-Fi area is empty, so the hole left by a missing Wi-Fi glyph carries the
      * battery percentage instead of staying blank.

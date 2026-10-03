@@ -200,6 +200,57 @@ public final class Prefs {
      * of the module.
      */
     public static final String KEY_OUT_SIGNAL_SIZE = "out_signal_size_dp";
+    /**
+     * The gap the out-of-ring network type keeps on its two sides, in density
+     * pixels.
+     *
+     * <p>Two keys rather than one: in the status bar the label is flanked by
+     * different things on each side - the native icon row on the outside, the
+     * out-of-ring signal reading (or the battery) on the inside - and the two
+     * gaps are tuned against those different neighbours.
+     *
+     * <p>Both are dplike rather than pixels for the same reason as
+     * {@link #KEY_OUT_SIGNAL_SIZE}: the label lives in the status bar's real
+     * pixel space, whose row height MIUI changes under the control centre, so a
+     * length measured in pixels would drift with the shade.
+     *
+     * <p>Each defaults to the single gap the label used to have hard-coded, so
+     * an install that never touches these keeps exactly the spacing it had.
+     *
+     * <p>New names, never a reuse: the framework does no type conversion, so
+     * every key has exactly one type for the whole lifetime of the module - see
+     * the note on {@link #KEY_MOBILE_TYPE_MODE}.
+     */
+    public static final String KEY_OUT_TYPE_MARGIN_LEFT = "out_type_margin_left_dp";
+    public static final String KEY_OUT_TYPE_MARGIN_RIGHT = "out_type_margin_right_dp";
+    /**
+     * How far the out-of-ring signal reading is nudged from the place the status
+     * bar computed for it, in density pixels; positive is right and down.
+     *
+     * <p>Applied to the reading's laid-out frame rather than to its drawing, so
+     * the label anchored on the reading follows it instead of being left behind.
+     * Kept as dp for the same reason as the margins above.
+     *
+     * <p>New names, never a reuse - see {@link #KEY_MOBILE_TYPE_MODE}.
+     */
+    public static final String KEY_OUT_SIGNAL_OFFSET_X = "out_signal_offset_x_dp";
+    public static final String KEY_OUT_SIGNAL_OFFSET_Y = "out_signal_offset_y_dp";
+    /**
+     * How large a trailing "A" is drawn against the rest of the network type, as
+     * a percentage.
+     *
+     * <p>The reference draws "5GA" with the "A" noticeably smaller than the
+     * "5G", sitting on the same baseline; 65 reproduces the reference's
+     * {@code A height / main height} of about 56/86. 100 turns the shrink off
+     * and restores the single-size label.
+     *
+     * <p>One key for both places the type is drawn - the ring canvas and the
+     * out-of-ring status-bar label - because the reference's proportion is a
+     * property of the label, not of where it happens to sit.
+     *
+     * <p>A new name, never a reuse - see {@link #KEY_MOBILE_TYPE_MODE}.
+     */
+    public static final String KEY_TYPE_SUFFIX_SCALE = "type_suffix_scale";
     public static final String KEY_TYPE_WEIGHT = "type_weight";
     public static final String KEY_TRACK_ALPHA = "track_alpha";
 
@@ -327,6 +378,26 @@ public final class Prefs {
      * any density instead of only matching on this one.
      */
     public static final int DEF_OUT_SIGNAL_SIZE = 15;
+    /**
+     * The gap the out-of-ring label keeps on each side, in dp.
+     *
+     * <p>2dp is the value the single hard-coded {@code OUT_LABEL_GAP_DP} used to
+     * hold, so the shipped spacing is unchanged and only a user who moves the
+     * sliders sees anything different.
+     */
+    public static final int DEF_OUT_TYPE_MARGIN_LEFT = 2;
+    public static final int DEF_OUT_TYPE_MARGIN_RIGHT = 2;
+    /**
+     * No nudge by default: the reading sits exactly where the status bar laid it
+     * out, which is the look every install already has.
+     */
+    public static final int DEF_OUT_SIGNAL_OFFSET_X = 0;
+    public static final int DEF_OUT_SIGNAL_OFFSET_Y = 0;
+    /**
+     * 65% for the trailing "A": the reference's {@code 56/86} ratio, measured
+     * from {@code docs/ref-5ga.png}. 100 turns the shrink off.
+     */
+    public static final int DEF_TYPE_SUFFIX_SCALE = 65;
     public static final int DEF_TYPE_WEIGHT = 700;
     public static final int DEF_TRACK_ALPHA = 56;
 
@@ -363,6 +434,31 @@ public final class Prefs {
      */
     public static final int MIN_OUT_SIGNAL_SIZE = 6;
     public static final int MAX_OUT_SIGNAL_SIZE = 20;
+    /**
+     * The span the two label margins offer, in dp.
+     *
+     * <p>0 lets the label butt right up against its neighbour and 16 is already
+     * wider than the gap between the native icons, so the whole useful range is
+     * inside it. The default 2 sits near the low end, where the shipped look is.
+     */
+    public static final int MIN_OUT_TYPE_MARGIN = 0;
+    public static final int MAX_OUT_TYPE_MARGIN = 16;
+    /**
+     * The nudge the out-of-ring reading accepts, in dp, in either direction.
+     *
+     * <p>Bounded at 12 so the reading cannot be walked far enough to collide
+     * with the battery on one side or leave the status bar's touchable strip on
+     * the other; the same span is offered on both axes.
+     */
+    public static final int MIN_OUT_SIGNAL_OFFSET = -12;
+    public static final int MAX_OUT_SIGNAL_OFFSET = 12;
+    /**
+     * The trailing "A" may be the same size as the rest (100) or a little over
+     * half of it (50). Below 50 the suffix stops reading as a letter at status
+     * bar sizes, and above 100 it would be the main glyph's larger twin.
+     */
+    public static final int MIN_TYPE_SUFFIX_SCALE = 50;
+    public static final int MAX_TYPE_SUFFIX_SCALE = 100;
     public static final int MIN_TYPE_WEIGHT = 100;
     public static final int MAX_TYPE_WEIGHT = 900;
     public static final int MIN_TRACK_ALPHA = 0;

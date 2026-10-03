@@ -96,6 +96,19 @@ public final class TrioAppearance {
     public final int typeSize;
     public final int outTypeSize;
     public final int outSignalSize;
+    /**
+     * The gap the out-of-ring label keeps on each side, in dp: {@code left} is
+     * the side facing away from the battery in LTR and {@code right} the side
+     * facing it. Both are physical sides of the label, not reading-order starts
+     * and ends - the RTL branch swaps which gap each one supplies.
+     */
+    public final int outTypeMarginLeft;
+    public final int outTypeMarginRight;
+    /** Nudge applied to the out-of-ring reading's laid-out frame, in dp. */
+    public final int outSignalOffsetX;
+    public final int outSignalOffsetY;
+    /** Scale of a trailing "A" in the network type, as a percentage. */
+    public final int typeSuffixScale;
     public final int typeWeight;
 
     private TrioAppearance(TrioSettings c) {
@@ -134,6 +147,11 @@ public final class TrioAppearance {
         typeSize = c.typeSize;
         outTypeSize = c.outTypeSize;
         outSignalSize = c.outSignalSize;
+        outTypeMarginLeft = c.outTypeMarginLeft;
+        outTypeMarginRight = c.outTypeMarginRight;
+        outSignalOffsetX = c.outSignalOffsetX;
+        outSignalOffsetY = c.outSignalOffsetY;
+        typeSuffixScale = c.typeSuffixScale;
         typeWeight = c.typeWeight;
     }
 

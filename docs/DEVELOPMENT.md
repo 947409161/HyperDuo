@@ -125,18 +125,20 @@ release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro
 
 ### 发布流水线
 
-发布是**一条本地命令**，没有 CI。主仓发完再发模块仓（两处都发同一个 APK）：
+发布是**一条本地命令**，没有 CI。`release.ps1` 发完主仓后**自动**调用 `release-module.ps1`，
+把同一个 APK、同一份说明发到 LSPosed 模块仓（模块页的下载链接走这里），两个仓库永远同版本：
 
 ```powershell
 .\release.ps1 -Version 1.0 -NotesFile .\release-notes-1.0.md
-.\release.ps1 -Version 1.0 -DryRun      # 只构建，不打 tag、不建 Release
+.\release.ps1 -Version 1.0 -DryRun             # 只构建，不打 tag、不建 Release、不发模块仓
+.\release.ps1 -Version 1.0 -SkipModuleRepo     # 只发主仓，跳过模块仓
 
-# 主仓成功后，同版本再发一次 LSPosed 模块仓（模块页的下载链接走这里）
+# 模块仓那步失败（主仓已发出）时单独补齐；或手动重发/覆盖模块仓的某个版本
 .\release-module.ps1 -Version 1.0 -VersionCode 10000 `
     -Apk .\dist\HyperDuo-1.0.apk -NotesFile .\release-notes-1.0.md
 ```
 
-`release.ps1` 按顺序做五件事，任何一步失败都立刻停下：
+`release.ps1` 按顺序做六件事，任何一步失败都立刻停下：
 
 1. 校验版本号（`major` / `major.minor` / `major.minor.patch`，缺段按 0 计），算出
    `versionCode = major*10000 + minor*100 + patch`。
@@ -146,7 +148,12 @@ release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro
    与预期不符就中止 —— 版本注入写错时这一步会立刻暴露，而不是等用户装上才发现。
 4. 打并推送 `v<version>` tag，创建 GitHub Release（`git credential fill` 取凭据，不存明文
    token），最后上传 APK asset。
-5. **清掉仓库里其它所有 Release**，只留刚发的这一版（见下）。
+5. **清掉主仓里其它所有 Release**，只留刚发的这一版（见下）。
+6. 调 `release-module.ps1` 发模块仓：同 APK、同说明，`-Force` / `-KeepOldReleases`
+   原样传递。模块仓自己校验 badging、上传 asset、同步 `module-README.md`、清理旧
+   Release。说明为空时模块仓会拒绝发布 —— LSPosed 规范要求 Release 正文就是
+   changelog，所以发版必须带 `-Notes` 或 `-NotesFile`。**这一步失败不会撤回主仓的
+   Release**，直接重跑 `release-module.ps1` 补齐即可。
 
 #### 只保留最新版 Release
 
@@ -234,13 +241,14 @@ adb shell am start -n io.github.yixing233.hyperduo/.ui.MainActivity
 ## 配置通道
 
 设置走 libxposed 的 remote preferences，组名 / 文件名同为 `Prefs.NAME = "hyperduo_settings"`；
-键与默认值集中在 `Prefs.java`，上下界也在那里（共 21 个键）。
+键与默认值集中在 `Prefs.java`，上下界也在那里（第十一轮后共 36 个 `KEY_*` 常量，其中
+`KEY_SHOW_MOBILE_TYPE` 是只读的迁移遗留键，实际读写的 35 个键见配置项参考）。
 
 - **写侧**（设置 App）：`HyperDuoApp.onServiceBind` 拿到 `XposedService`，之后每次改动都
   `getRemotePreferences(NAME).edit().putX(...).commit()`，并把同一份写进本应用的
   `SharedPreferences`（即 `shared_prefs\hyperduo_settings.xml`）。服务是异步绑定、也可能随时
   死亡，所以 `SettingsRepository` 每次写入都实时取 `HyperDuoApp.xposedService`，**不缓存
-  service**；绑定成功时还会 `syncAllToFramework()` 全量重放 21 个键，补齐框架缺席期间的改动。
+  service**；绑定成功时还会 `syncAllToFramework()` 全量重放这 35 个键，补齐框架缺席期间的改动。
   **每新增一个键都必须同时加到 `syncAllToFramework()`**，否则该键在框架重连后不会下发。
 - **读侧**（hook 进程）：remote `SharedPreferences` 是**只读**的，但支持
   `registerOnSharedPreferenceChangeListener`，框架会实时投递变更。`TrioConfig` 注册一个监听器，
@@ -576,6 +584,36 @@ Wi-Fi 搬进缺口仍是 canvas 变换（`translate` + `scale`）完成的，几
 裸的 `mobileTypeMode == X` 比较。`show_mobile_type` 是废弃的旧布尔键，仅用于迁移读取
 （见配置项参考）。
 
+**结尾 A 的缩小（`type_suffix_scale`）**：参考图 `docs/ref-5ga.png` 量出 A 高 / 主字高 ≈
+56/86 ≈ 0.65，底边与主字底边近似齐平（差 2px），所以默认 65。这个比例是**标签本身的属性**，
+与它画在环内还是环外无关，因此环内、环外共用一个键，两处各用自己的机制实现：
+
+- **环内（Canvas）**：`Canvas.drawText(CharSequence,...)` **不应用 Span**（只有 `TextPaint` 经
+  `StaticLayout` 才会），所以 `TrioRenderer.drawType` 分两段绘制：先量 `"5G"` 与 `"A"` 的宽度，
+  按总宽算出左起点（`TEXT` 默认 `Align.CENTER`，居中会让两段叠在同一处，所以绘制期间切成
+  `Align.LEFT`、画完还原），两段共用同一条 baseline 以保证底边对齐。`fitSize` 也走同一套
+  量测（`measureType`），否则用整串宽度判断「装不下」会把本来放得下的标签缩小。
+- **环外（TextView）**：`OutTypeLabel` 是真 `TextView`，直接用
+  `SpannableStringBuilder` + `RelativeSizeSpan` 套在末字上，平台自动排版并对齐 baseline。
+- **判断后缀**：MIUI 报的是整串（`"5GA"`），所以规则是「末字为 `A` 且长度 > 1 且比例 < 100」
+  （`TrioGeometry.hasShrunkSuffix`）。比例 100 即关闭缩小；单独的 `"A"` 不是后缀，缩小它等于整体
+  变小，那是字号滑杆的事。
+
+**环外标签的两个边距（`out_type_margin_left_dp` / `_right_dp`）**：标签的两个邻居不同——外侧
+对着原生图标行，内侧对着环外读数（没有读数时对着电池），两条缝分别调。语义按**物理左右**定义
+（不是阅读顺序的 start/end），RTL 下整行镜像，所以 `placeOutTypeLabel` 里 LTR 用右缝、RTL 用左缝
+（`anchor.getLeft() - right - width` 对 `anchor.getRight() + left`）。`reserveOutRingStrip` 是唯一
+把两条缝合成为**一个** strip 数字的地方（见其注释），同样按 RTL 取「朝锚点」的那条缝；只有标签
+独占时才会把外侧那条缝也算进去。
+
+**环外读数的位置偏移（`out_signal_offset_x_dp` / `_y_dp`）**：走**布局层**（在
+`placeOutTypeLabel` 的 clamp 之后把像素偏移加到 `left`/`top`），不走 `drawOutSignal` 改
+`x0`/`baseline`。两个理由：视图的测量尺寸/占位不变（偏移后不会被裁、也不会和邻居重叠），且标签
+锚在读数已偏移的 `left` 上会**自动跟着走**，两者不会脱节。`placeOutTypeLabel` 里已有的
+`setTranslationX(-islandShiftPx)` 是超级岛专用，偏移加在 `layout()` 的坐标上而非 translation，
+两者不打架。水平偏移默认 0，所以 `placeOutTypeLabel` 的三参重载保留给标签自己用（标签不带偏移，
+由读数带动）。
+
 已知风险：原生 `mobile_type_single` 是 mobile 槽组的子级，而 `foldedSlots()` 不包含
 `mobile_type`，所以「关闭显示移动信号点 + 环外」时可能同时看到原生与自建两个标签。环内模式不会
 冲突 —— 它一定伴随 mobile 槽折叠。
@@ -601,17 +639,24 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 
 ### 预览与状态栏共用几何
 
-`TrioPreviewView`（设置界面里 46dp 的方块）直接调用
+`TrioPreviewView`（设置界面顶部一行 39dp 的方块）直接调用
 `TrioRenderer.drawInto(..., clearWhenDone=false)`，与状态栏走同一份代码与同一个 `TrioSettings`
 快照。`clearWhenDone=false` 是必须的 —— UI 预览若清画布会把 Activity 背景擦成透明黑。
 
-预览卡共 7 格：充电 / 快充 / 正常 / 无 Wi-Fi（带双卡电平与环内类型）/ 省电 / 危险 / **环外类型**。
-第 7 格是唯一的例外：环外标签不由渲染器绘制（见「网络类型：环内与环外」），所以那一格走
-`TrioPreviewView.setOutTypeOnly(true)` 自己画。它必须与 `TrioHooks.updateOutTypeLabel` 同口径
-——字号取 `outTypeSize`、字重取 `typeWeight`、按 px 而非 sp，再把宿主 20dp 图标盒按预览自身
-的高度等比换算（`HOST_ICON_HEIGHT_DP = 20f`，与 `docs` 里 `status_bar_icon_height` 一致）。
-`out_type_size` 在设置页别处**没有任何可见反馈**，这一格就是它的唯一所见即所得参照；口径一旦
-和钩子侧不一致，预览就开始骗人，比没有预览更糟。
+预览卡共 8 格：充电 / 快充 / 正常 / 无 Wi-Fi（带双卡电平与环内类型）/ 省电 / 危险 /
+**环外类型** / **环外信号**。后两格是例外：环外标签与环外读数都不由渲染器绘制
+（见「网络类型：环内与环外」与「环外信号」），所以走
+`TrioPreviewView.setOutTypeOnly(true)` / `setOutSignalOnly(true)` 自己画。标签那格必须与
+`TrioHooks.updateOutTypeLabel` 同口径——字号取 `outTypeSize`、字重取 `typeWeight`、按 px 而非 sp，
+再把宿主 20dp 图标盒按预览自身的高度等比换算（`HOST_ICON_HEIGHT_DP = 20f`，与 `docs` 里
+`status_bar_icon_height` 一致），结尾 A 的缩放取 `type_suffix_scale`。`out_type_size` 在设置页
+别处**没有任何可见反馈**，这一格就是它的唯一所见即所得参照；口径一旦和钩子侧不一致，预览就
+开始骗人，比没有预览更糟。信号那格同理：按 `out_signal_size_dp × density` 与参照纵横比定出
+读数尺寸，并把 `out_signal_offset_*_dp` 换算成格内的位移（格宽按「读数 + 两侧满量程偏移」定，
+否则大偏移会把读数推出格子，看起来像没有这一项）。
+
+`PREVIEW_SIZE = 39.dp` 是为了让八格一行放得下（8×39 + 7×4 = 340dp < 344dp）。第 7 格用了
+`"5GA"` 作为示例类型——正是为了让 `type_suffix_scale` 有可见反馈。
 
 唯一的额外处理：状态栏里这个标签是 wrap-content、排在图标盒旁边，宽了就往右伸不会被裁；
 而预览格是个正方形，`"5GA"` 这种宽字串会顶到边界。所以 `TrioPreviewView.drawOutTypeLabel`
@@ -892,10 +937,16 @@ int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `
 **两个视图共用一条 strip**：信号与类型标签都排在电池图标左边，都以
 `reserveOutTypeSpace(container, total)` 往容器左侧撑 padding。它们各自更新时如果都按自己的宽度
 去撑，后更新的那个就会把先更新的挤掉，所以统一走 `reserveOutRingStrip(container)` —— 它读两个
-子视图的 `getMeasuredWidth()` 求和（信号在前、标签在外，间距各一份 gap），一次撑到位。
-定位用 `placeOutTypeLabel(container, view, anchor)`，标签的锚点是 `labelAnchorIn(container,
-meter)`：有信号就贴在信号外侧，否则直接贴电池盒 —— 阅读顺序是 网络类型 → 信号 → 电池，
-标签永远在最外。
+子视图的 `getMeasuredWidth()` 求和（信号在前、标签在外，间距按 `out_type_margin_left/right_dp`
+取「朝锚点」的那条缝），一次撑到位。定位用
+`placeOutTypeLabel(container, view, anchor, offsetX, offsetY)`，标签的锚点是
+`labelAnchorIn(container, meter)`：有信号就贴在信号外侧，否则直接贴电池盒 —— 阅读顺序是
+网络类型 → 信号 → 电池，标签永远在最外。读数的位置偏移（`out_signal_offset_*_dp`）就加在
+`placeOutTypeLabel` 的坐标上，标签因此自动跟随；标签自己用三参重载（偏移为 0）。
+
+**位置偏移的验证**：`work/outringcheck` 的 `SuffixShot` 同时是后缀缩放的量测脚本——它把
+`"5GA"` 按若干比例渲染进环心，用列游程量出末段与主段的高度比，默认 65 应落在 0.65 附近、
+比例 100 应与旧版单字号完全一致。
 
 **采样时机**：环外堆叠也要分卡读数，所以 `TrioState.refresh()` 的轮询门与
 `hyperduo-signal` 里的 `pollSimsNow` 条件都从裸的 `dualSim` 放宽成
@@ -950,7 +1001,12 @@ meter)`：有信号就贴在信号外侧，否则直接贴电池盒 —— 阅�
 | `value_weight` | `700` | 100 – 900 |
 | `type_size` | `32` | 16 – 44（只用于环内） |
 | `out_type_size` | `32` | 16 – 64（只用于环外；上界高于 `type_size`，见 `Prefs.java` 的说明） |
+| `type_suffix_scale` | `65` | 50 – 100（结尾为 A 的类型如 5GA，末尾 A 相对主字号的百分比；环内分段绘制、环外用 `RelativeSizeSpan`，两处共用同一个键） |
+| `out_type_margin_left_dp` | `2` | 0 – 16（环外标签与其**外侧**的空隙，dp；RTL 下随整行镜像） |
+| `out_type_margin_right_dp` | `2` | 0 – 16（环外标签与其**内侧**的空隙，dp；RTL 下同样镜像） |
 | `out_signal_size_dp` | `15` | 6 – 20（环外信号读数的 dp 高度；乘显示器密度成像素，**不跟随电池容器高度**，只用于环外 + 堆叠信号） |
+| `out_signal_offset_x_dp` | `0` | -12 – 12（环外读数左右偏移的 dp；正数向右，标签跟着走） |
+| `out_signal_offset_y_dp` | `0` | -12 – 12（环外读数上下偏移的 dp；正数向下，只动读数不改占位） |
 | `type_weight` | `700` | 100 – 900（环内/环外共用） |
 | `track_alpha` | `56` | 0 – 255 |
 | `debug_log` | `false` | — |

@@ -57,6 +57,12 @@
     <string name="out_signal_size_title">Out-of-ring signal size</string>
     <string name="out_signal_size_summary">Overall height of the out-of-ring reading, in dp, so it converts itself to pixels on any screen density. 15dp is the same height as the status bar\'s own signal icon, and is the default; the slider covers 6–20dp. The same row is drawn at the same size whether or not the dot row follows it, so the two shapes never come out different sizes, and pulling the control centre down does not change it.</string>
 
+    <string name="out_signal_offset_x_title">Out-of-ring signal position, horizontal</string>
+    <string name="out_signal_offset_x_summary">How far the out-of-ring reading moves sideways in the status bar, in dp; positive moves it right. The default is 0dp and the slider covers -12–12dp. The out-of-ring network type label sits on the reading\'s far side and moves with it.</string>
+
+    <string name="out_signal_offset_y_title">Out-of-ring signal position, vertical</string>
+    <string name="out_signal_offset_y_summary">How far the out-of-ring reading moves up or down in the status bar, in dp; positive moves it down. The default is 0dp and the slider covers -12–12dp. It moves the reading alone and changes neither its height nor the room it reserves.</string>
+
     <string name="value_centre_title">Centre the percentage</string>
     <string name="value_centre_summary">Enlarge the percentage into the middle of the ring and always keep it there. The Wi-Fi arcs shrink into the top notch, a smaller bolt takes the notch while charging (the arcs are then dropped), and an in-ring network type moves into the notch too.</string>
 
@@ -98,6 +104,15 @@
 
     <string name="out_type_size_title">Out-of-ring type size</string>
     <string name="out_type_size_summary">Font size of the 3G/4G/5G label shown outside the ring, in the status bar. That label is drawn by the status bar itself, so the matching preview cell here is the only place its size is visible.</string>
+
+    <string name="out_type_margin_left_title">Out-of-ring type margin, left</string>
+    <string name="out_type_margin_left_summary">The gap between the out-of-ring network type label and its outer side - the one facing away from the battery - in dp. The default is 2dp and the slider covers 0–16dp. Under an RTL language the whole row mirrors and this margin moves to the other side with it.</string>
+
+    <string name="out_type_margin_right_title">Out-of-ring type margin, right</string>
+    <string name="out_type_margin_right_summary">The gap between the out-of-ring network type label and its inner side - the one facing the battery and the out-of-ring reading - in dp. The default is 2dp and the slider covers 0–16dp. It mirrors under an RTL language too.</string>
+
+    <string name="type_suffix_scale_title">The A in 5GA</string>
+    <string name="type_suffix_scale_summary">When the network type ends in an A (such as 5GA), the size of that trailing A as a percentage of the main label\'s, sharing its baseline. The default is 65%% and the slider covers 50–100%%; 100%% stops the shrink. Applies both inside the ring and outside it.</string>
 
     <string name="type_weight_title">Network type weight</string>
     <string name="type_weight_summary">Stroke weight of the network type, 100 lightest to 900 heaviest.</string>

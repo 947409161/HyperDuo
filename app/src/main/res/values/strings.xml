@@ -57,6 +57,12 @@
     <string name="out_signal_size_title">环外信号大小</string>
     <string name="out_signal_size_summary">环外读数的整体高度，单位为 dp（会随屏幕密度自动换算成像素）。15dp 与状态栏原生信号图标同高，也是默认值；可调范围 6–20dp。无论有没有下方圆点排，同一行都按同一大小绘制，两种形状不会一大一小。下拉控制中心不会改变它。</string>
 
+    <string name="out_signal_offset_x_title">环外信号水平位置</string>
+    <string name="out_signal_offset_x_summary">环外读数在状态栏里左右移动的距离，单位为 dp，正数向右。默认 0dp，可调范围 -12–12dp。环外网络类型标签贴在读数外侧，会跟着一起移动。</string>
+
+    <string name="out_signal_offset_y_title">环外信号垂直位置</string>
+    <string name="out_signal_offset_y_summary">环外读数在状态栏里上下移动的距离，单位为 dp，正数向下。默认 0dp，可调范围 -12–12dp。只影响读数自己，不改变它的高度与占位。</string>
+
     <string name="value_centre_title">电量数字居中</string>
     <string name="value_centre_summary">电量数字放大到圆环中间并始终优先占据圆心。Wi-Fi 弧缩到顶部缺口，充电时改用小的闪电占用缺口（此时不画 Wi-Fi 弧），环内的网络类型也让位到缺口。</string>
 
@@ -98,6 +104,15 @@
 
     <string name="out_type_size_title">环外网络类型字号</string>
     <string name="out_type_size_summary">状态栏中环外 3G/4G/5G 等文字的大小。这个标签由系统状态栏绘制，设置页里的预览格是它唯一的所见即所得参照。</string>
+
+    <string name="out_type_margin_left_title">环外类型左边距</string>
+    <string name="out_type_margin_left_summary">环外网络类型标签与其外侧（背对电池的一侧）之间的空隙，单位为 dp。默认 2dp，可调范围 0–16dp。RTL 语言下整行镜像，这条边距会跟着翻到另一侧。</string>
+
+    <string name="out_type_margin_right_title">环外类型右边距</string>
+    <string name="out_type_margin_right_summary">环外网络类型标签与其内侧（朝向电池与环外读数的一侧）之间的空隙，单位为 dp。默认 2dp，可调范围 0–16dp。RTL 语言下同样会镜像。</string>
+
+    <string name="type_suffix_scale_title">5GA 中 A 的比例</string>
+    <string name="type_suffix_scale_summary">网络类型以 A 结尾时（如 5GA），末尾的 A 相对主字号的百分比，底边与主字对齐。默认 65%%，可调范围 50–100%%；100%% 即不再缩小。环内与环外两处同时生效。</string>
 
     <string name="type_weight_title">网络类型字重</string>
     <string name="type_weight_summary">网络类型的笔画粗细，100 最细、900 最粗。</string>

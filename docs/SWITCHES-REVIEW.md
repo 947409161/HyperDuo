@@ -12,12 +12,12 @@
 
 | 层 | 文件 | 职责 |
 | --- | --- | --- |
-| 存储 / 默认 / 界限 | `app/src/main/java/io/github/yixing233/hyperduo/Prefs.java` | 25 个在用键（另有 1 个只读 legacy 键 `show_mobile_type`）、全部 `DEF_*` 默认与上下限，两侧共用的唯一真源 |
+| 存储 / 默认 / 界限 | `app/src/main/java/io/github/yixing233/hyperduo/Prefs.java` | 30 个在用键（另有 1 个只读 legacy 键 `show_mobile_type`）、全部 `DEF_*` 默认与上下限，两侧共用的唯一真源 |
 | 快照 | `app/src/main/java/io/github/yixing233/hyperduo/TrioSettings.java` | 25 个 public 字段、`from`/`copy`/`applyKeyFrom`/`fromBundle`/`toBundle`，clamp 在读侧发生 |
 | 写入漏斗 | `app/src/main/java/io/github/yixing233/hyperduo/ui/SettingsRepository.kt` | 20 个 setter，每个都「本地 commit → push 到远程 preferences → 广播」 |
 | 渲染 | `app/src/main/java/io/github/yixing233/hyperduo/TrioRenderer.java` | 只读 `TrioSettings`，画圆环或矩形 |
 | Hook | `app/src/main/java/io/github/yixing233/hyperduo/TrioHooks.java` | 开关折叠槽位、交还原生图标、挂环外标签 |
-| 界面 | `app/src/main/java/io/github/yixing233/hyperduo/ui/SettingsScreen.kt` | 4 个分页、20 个可写项、33 处 `enabled =` |
+| 界面 | `app/src/main/java/io/github/yixing233/hyperduo/ui/SettingsScreen.kt` | 4 个分页、25 个可写项、52 处 `enabled =`（第十一轮后；原为 20 / 33） |
 
 链路是单向的：`SettingsScreen`（唯一写入口 `update`，`SettingsScreen.kt:287-290`）→ `SettingsRepository` → SharedPreferences + 远程 preferences + 广播 → `TrioConfig` 快照 → `TrioRenderer` / `TrioHooks`。**渲染侧从不回写**，这条边界是干净的，问题全部出在「开关之间的语义」上。
 
@@ -41,17 +41,22 @@
 | 数字字号 / 字重 | `value_size` / `value_weight` | `:766-774` / `:779-793` | `:371/561`、`:372/566` | 不读 |
 | 圆环内类型字号 | `type_size` | `:805-815` | `:360`、`:583`、`:599` | 不读 |
 | 环外字号 | `out_type_size` | `:823-836` | 不读 | `:1801`、`:1939-1944` |
+| 5GA 中 A 的比例 | `type_suffix_scale` | 第十一轮（见 6.9） | `:368`（矩形）、`:783`、`:799`（环内分段绘制） | `:2031`（环外 `RelativeSizeSpan`）|
+| 环外类型左边距 | `out_type_margin_left_dp` | 第十一轮 | 不读 | `placeOutTypeLabel` / `reserveOutRingStrip` |
+| 环外类型右边距 | `out_type_margin_right_dp` | 第十一轮 | 不读 | 同上 |
+| 环外信号水平位置 | `out_signal_offset_x_dp` | 第十一轮 | `TrioPreviewView.drawOutSignal` | `updateOutSignal` / `refreshOutSignal` |
+| 环外信号垂直位置 | `out_signal_offset_y_dp` | 第十一轮 | 同上 | 同上 |
 | 网络类型字重 | `type_weight` | `:842-853` | `:361`、`:585`、`:601` | `:1946`（环外标签用它）|
 | 底纹浓度 | `track_alpha` | `:854-862` | `:285`、`:311`、`:411`、`:518` | 不读 |
 | 调试日志 | `debug_log` | `:950-958` | 不读 | `:80-82` |
 
-**第一个整体印象**：25 个在用键的归属可以干净地分成三类——
+**第一个整体印象**（下面的分类是**第十轮之前的快照**，那之后 `signal_mode`、`stacked_signal`、`data_sim_only`、`out_signal_size` 等键加入，第十一轮又加了 5 个；这里保留原文的分类结构，只在末尾补上本轮新键的归属）：
 
-- **两侧都读（9 个）**：`show_wifi`、`show_mobile`、`show_value`、`show_bolt`、`mobile_type_mode`、`ring_stroke`、`arc_stroke`、`value_size`、`type_weight`。
-- **只有渲染侧读（13 个）**：`trio_style`、`swap_wifi_value`、`track_alpha`、`value_weight`、`type_size`、`role_colors`、六个 `color_*`、`low_threshold`。
-- **只有 Hook 侧读（3 个）**：`enabled`、`out_type_size`、`debug_log`（`TrioConfig.debugLog()`，`TrioHooks.java:80-81`）。
+- **两侧都读**：`show_wifi`、`show_mobile`、`show_value`、`show_bolt`、`mobile_type_mode`、`ring_stroke`、`arc_stroke`、`value_size`、`type_weight`，加上本轮加入的 `type_suffix_scale`（环内分段绘制、环外 `RelativeSizeSpan`）与两个环外偏移 `out_signal_offset_x_dp` / `out_signal_offset_y_dp`（`TrioHooks` 定位 + `TrioPreviewView` 预览）。
+- **只有渲染侧读**：`trio_style`、`swap_wifi_value`、`track_alpha`、`value_weight`、`type_size`、`role_colors`、六个 `color_*`、`low_threshold`（第十轮后的 `out_signal_size` 也属此类）。
+- **只有 Hook 侧读**：`enabled`、`out_type_size`、`debug_log`（`TrioConfig.debugLog()`，`TrioHooks.java:80-81`），加上本轮的两个环外标签边距 `out_type_margin_left_dp` / `out_type_margin_right_dp`。
 
-而 9 个「两侧都读」里，`ring_stroke`/`arc_stroke`/`value_size` 在 Hook 侧只出现在 `TrioHooks.java:346-347` 的 debug 日志字符串里、不参与任何逻辑。**真正需要两个进程就同一份规则达成一致的只有 7 个**：6 个结构开关（`enabled` 由 Hook 侧独占但语义上凌驾全部）加 `type_weight`（环外标签按它取字重，见 2.6）。恰恰就是这几个，把复杂度撑起来了。
+`ring_stroke`/`arc_stroke`/`value_size` 在 Hook 侧只出现在 `TrioHooks.java:346-347` 的 debug 日志字符串里、不参与任何逻辑。**真正需要两个进程就同一份规则达成一致的** = 6 个结构开关（`enabled` 由 Hook 侧独占但语义上凌驾全部）加 `type_weight`（环外标签按它取字重，见 2.6）与 `type_suffix_scale`（两处必须给出同一个比例）。恰恰就是这几个，把复杂度撑起来了。
 
 ---
 
@@ -108,7 +113,7 @@ final boolean valueInCentre = hasValue && (centred || (!wifi && !typeInRing));
 
 ### 2.4 门禁的表达方式不统一，而且原因看不见
 
-33 处 `enabled =` 里，20 个可写项的依赖关系有 5 种：仅总开关（14 个）、`showValue`（2 个）、`mobileTypeMode`（3 个）、`roleColors`（4 个）、`showWifi+showValue`（1 个），另有 1 个无门禁（调试日志）。
+33 处 `enabled =` 里，20 个可写项（**改造前的数字**，第十一轮后为 52 / 25）的依赖关系有 5 种：仅总开关（14 个）、`showValue`（2 个）、`mobileTypeMode`（3 个）、`roleColors`（4 个）、`showWifi+showValue`（1 个），另有 1 个无门禁（调试日志）。
 
 被禁用的原因**只能长按 Tooltip 看到**（`gateHint` `:1668-1672` → `TooltipBox`），行本身是灰的、没有任何文字说明。而且 `gateHint` 只报第一个未满足的依赖，`show_mobile_type_title`（「网络类型」）这个标题被三处不同含义的缺依赖提示反复借用（`:803`、`:821`、`:840`）。
 
@@ -131,7 +136,7 @@ final boolean valueInCentre = hasValue && (centred || (!wifi && !typeInRing));
 
 ### 2.6 预览盖不住所有东西，写入路径有三条
 
-预览（`PreviewCard` `:1163-1196`）走 `TrioPreviewView` → `TrioRenderer.drawInto`，和状态栏共用同一份渲染代码，这点是好的。但它有盲区：**环外网络类型不是 `TrioRenderer` 画的**，而是 `TrioHooks` 挂的一个 `OutTypeLabel` TextView（`TrioHooks.java:1697-1704`）。所以 `out_type_size` 这个滑块在设置页里**永远没有任何可见反馈**，用户只能切回状态栏看。
+预览（`PreviewCard` `:1163-1196`）走 `TrioPreviewView` → `TrioRenderer.drawInto`，和状态栏共用同一份渲染代码，这点是好的。但它有盲区：**环外网络类型不是 `TrioRenderer` 画的**，而是 `TrioHooks` 挂的一个 `OutTypeLabel` TextView（`TrioHooks.java:1697-1704`）。所以 `out_type_size` 这个滑块在设置页里**永远没有任何可见反馈**，用户只能切回状态栏看。（**这条盲区已在第 6.4 / 6.9 节补上**：预览末两格分别画环外标签与环外读数，第 7 格在第十一轮起用 `"5GA"` 示例，于是 `out_type_size`、`out_type_margin_*`、`type_suffix_scale`、`out_signal_size`、`out_signal_offset_*` 都有可见反馈。）
 
 写入路径有三条而不是一条：标准 `writeBoolean`/`writeInt`（`SettingsRepository.kt:147-157`）、手写的 `resetRoleColors`（`:66-84`，6 个键 commit 一遍再统一 push + 广播）、以及整表推送的 `syncAllToFramework`（`:111-145`，服务绑定后把本地全部值推给框架）。三条都必须记得「push → notifyModule」，而 `notifyModule`（`:173-180`）的载荷恒为全量按键打包。
 
@@ -243,9 +248,9 @@ record KeyDef(String key, Kind kind, int def, int min, int max,
 
 同一批可以视情况给矩形拆 `rect_arc_offset`，但收益不如 `bar_stroke` 直接，可以推迟。
 
-### P2-1：预览补齐环外类型
+### P2-1：预览补齐环外类型（**已落地**，见 6.4 / 6.9）
 
-`out_type_size` 在今天没有任何可见反馈（见 2.6）。最小做法：在预览末尾加第 7 格，画「电池环 + 右侧一个 5G 文本」，字号取 `outTypeSize`、字重取 `typeWeight`。**关键约束**：它必须在预览里用与 `TrioHooks.updateOutTypeLabel`（`:1936-1948`）相同的取值口径（字号 `outTypeSize`、字重 `typeWeight`、PX 而非 SP），否则预览又开始骗人。
+`out_type_size` 在今天没有任何可见反馈（见 2.6）。最小做法：在预览末尾加第 7 格，画「电池环 + 右侧一个 5G 文本」，字号取 `outTypeSize`、字重取 `typeWeight`。**关键约束**：它必须在预览里用与 `TrioHooks.updateOutTypeLabel`（`:1936-1948`）相同的取值口径（字号 `outTypeSize`、字重 `typeWeight`、PX 而非 SP），否则预览又开始骗人。实际落地时第 7 格**不画电池环**、只画那个环外标签，并在第十一轮把示例类型改为 `"5GA"`。
 
 ### P2-2：`resetAllDefaults` 与写入路径收敛
 
@@ -423,3 +428,42 @@ final float scale = Math.min(width / inkW, height / outSignalInkH(dotRow));
 - **断言教训二（出图工装写死尺寸就看不见尺寸 bug）**：`OutSignalShot` 原来把三个单元格的宽高写死成参考框 `251×209`，于是 `squat` 也报 `PASS`；改成**向生产同一对函数要盒子**（取一个合成密度 `STACK_INK_H / shipped`，于是 `outSignalHeight(shipped, STACK_INK_H / shipped)` 恰好让交付的 dp 设置渲染成参考框 `251×209` 的 1:1 结果，再 `outSignalWidth(...)`）之后，`squat` 立刻报 `FAIL: 6 measurement(s) differ from the reference`（含 `MISMATCH bar_w: reference 50 vs rendered 49` 与 `one SIM (bars only) bar heights: [104, 139, 174, 209] vs the two-SIM reading's [75, 100, 125, 150]`），`fixed` 仍 `PASS`。
 - `compare.py` 判据同步调整：参考图逐项比对只跑**两卡格**（其墨恰好填满 209 参考框、零偏移）；单卡/上网卡改为与两卡格逐根比柱高（容差 1px）——它们在 209 框里居中会少 1px 抗锯齿边缘，拿它们去比参考图量到的是**居中**而非几何。
 - Gradle `:app:assembleDebug --offline` `BUILD SUCCESSFUL`。
+
+### 6.9 第十一轮：环外边距、环外信号位置与「5GA」的 A
+
+用户在同一轮提了三件事，都落在环外这条线上，一次做完、一个版本号（`1.6` / `versionCode 10600`）。
+
+**一、环外网络类型标签的两个左右边距**
+
+- 键 `out_type_margin_left_dp` / `out_type_margin_right_dp`，int dp，默认都 `2`（= 原硬编码常量 `OUT_LABEL_GAP_DP`，所以老安装外观不变），范围 `0..16`。
+- **语义按物理左右、不按阅读顺序**：条带在 LTR 下是 `[标签] --右缝-- [读数] --右缝-- [电池]`，标签的**外侧**对着原生图标行、**内侧**对着读数（或电池）。RTL 下整行镜像，两条缝互换物理方向，所以 `placeOutTypeLabel` LTR 用右缝（`anchor.getLeft() - right - width`）、RTL 用左缝（`anchor.getRight() + left`）。
+- **必须在一个地方合成**：strip 是**一个** padding 数字（`reserveOutRingStrip`），两条缝在这里按 RTL 取「朝锚点」的那条算出 total；只有标签独占（没有读数）时把外侧那条缝也算进去。分别 reserve 会让后更新的那个把先更新的挤掉。
+- 原来的单值 `outLabelGap(container)` 拆成 `outLabelMargins(container)`（返回 dp→px 的 `{左, 右}`）与 `outLabelGap(container, rtl)`；dp→px 与 `outSignalHeight` 同法，取显示器密度而非状态栏行高。
+
+**二、环外信号读数的上下 + 左右位置**
+
+- 键 `out_signal_offset_x_dp` / `out_signal_offset_y_dp`，int dp，默认 `0`，范围 `-12..12`。
+- **走布局层，不走 `drawOutSignal` 的 `x0`/`baseline`**。三个理由：视图测量尺寸/占位不变（偏移后不会被裁、也不会与邻居重叠，避免了路径 B 的坑）；标签锚在读数**已偏移的** `left` 上会自动跟随，两者不会脱节；水平偏移若走 `translationX` 会与 `placeOutTypeLabel` 里超级岛的 `setTranslationX(-islandShiftPx)` 互相覆盖，而走 `layout()` 坐标则完全不冲突。偏移加在 clamp **之后**——clamp 保默认态在行内，偏移是用户明确要的，就给他。
+- `placeOutTypeLabel` 增开四参重载（带 `offsetX/offsetY`），三参重载保留给标签自己（标签不带偏移，由读数带动）；工作台的文本 pin 锚的正是三参那两处标签调用，因此不受影响。
+
+**三、「5GA」里的 A 相对主字号缩小**
+
+- 键 `type_suffix_scale`（**不是** `out_type_suffix_scale`：这是标签自身的属性，与画在环内还是环外无关，两处共用一个键），int 百分比，默认 `65`，范围 `50..100`。
+- 目标值来自用户参考图 `docs/ref-5ga.png` 的量测：三段字形末段（A）高 56、主段 86 ⇒ **≈0.65**，且 A 底边 115 与主字底边 117 近似齐平（差 2px）。`work/outringcheck/SuffixShot` 把这段量测固化成了脚本：按若干比例渲染 `"5GA"`、列游程量高，实测 50/65/80/100 → `0.481 / 0.625 / 0.779 / 0.971`（65 时读数 0.625，与参考的 0.65 同档；100 与旧版单字号一致）。
+- **两条独立路径**（同一比例、两套机制）：
+  - **环内（Canvas）**：`TrioRenderer.drawType` 分两段绘制。`Canvas.drawText(CharSequence,...)` 不应用 Span，只有 `TextPaint` + `StaticLayout` 才会，所以必须自己量宽、自己排。`TEXT` 默认 `Align.CENTER`，绘制期间切成 `Align.LEFT`、画完还原（居中会让两段叠在同一处）；两段共用同一条 baseline 保证底边对齐。`fitSize` 走同一套量测（`measureType`），否则用整串宽度判断「装不下」会把本来放得下的标签缩小。
+  - **环外（TextView）**：`OutTypeLabel` 是真 `TextView`，直接 `SpannableStringBuilder` + `RelativeSizeSpan` 套在末字，平台自己排版对齐。`label.suffixScale` 记住当前比例——比例变了但**字符没变**（还是「5GA」），只比 `getText()` 会跳过重建，滑杆看起来是死的。
+- **后缀判定**：`TrioGeometry.hasShrunkSuffix(text, scale)` = 比例 < 100 且长度 > 1 且末字为 `A`。单独的 `"A"` 不是后缀（缩小它等于整体变小，那是字号滑杆的事）。
+
+**四、门禁与预览**
+
+- 新滑杆的 `enabled` 都复用既有谓词，且**提示链不含自身**（6.7 二的规则）：类型边距与 A 比例用 `a.typeOutOfRing` / `a.typeAnywhere()`，信号两个偏移用 `a.stackedOut()`（与 `out_signal_size` 同一条提示链）。
+- 预览第 7 格的示例类型由 `"5G"` 改为 **`"5GA"`**，正是为了让 A 比例有可见反馈；`TrioPreviewView.drawOutTypeLabel` 同步走两段绘制。第 8 格把 `out_signal_offset_*_dp` 换算成格内位移，格宽按「读数 + 两侧满量程偏移」定——否则大偏移会把读数推出格子，看起来像没这一项。
+- 顺手清掉了 `TrioPreviewView` 里声明未用的陈旧常量 `OUT_LABEL_GAP_DP`（它的 javadoc 还自称是 `TrioHooks.OUT_LABEL_GAP_DP` 的镜像，而后者已经不存在）。
+
+**五、验证**
+
+- 五个工装（`gapcheck` / `slotcheck` / `dualsimcheck` / `simcheck` / `outringcheck`）全部 `exit 0`（`outringcheck` 的四个构建：fixed=0、refold/inert/squat=1）。
+- `work/outringcheck/SuffixShot` 新增，量出 A/主字高度比随比例单调，65 → 0.625。
+- Gradle `:app:assembleDebug --offline` `BUILD SUCCESSFUL`。
+- **未做**：设备端两条实证（环外读数尺寸不随下拉变大、仅显示上网卡实时生效）——写出本轮时 `adb devices -l` 仍是 `192.168.1.148:44453 offline`。

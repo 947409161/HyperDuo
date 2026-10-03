@@ -98,6 +98,11 @@ class SettingsRepository(context: Context) {
     fun setTypeSize(value: Int) = writeInt(Prefs.KEY_TYPE_SIZE, value)
     fun setOutTypeSize(value: Int) = writeInt(Prefs.KEY_OUT_TYPE_SIZE, value)
     fun setOutSignalSize(value: Int) = writeInt(Prefs.KEY_OUT_SIGNAL_SIZE, value)
+    fun setOutTypeMarginLeft(value: Int) = writeInt(Prefs.KEY_OUT_TYPE_MARGIN_LEFT, value)
+    fun setOutTypeMarginRight(value: Int) = writeInt(Prefs.KEY_OUT_TYPE_MARGIN_RIGHT, value)
+    fun setOutSignalOffsetX(value: Int) = writeInt(Prefs.KEY_OUT_SIGNAL_OFFSET_X, value)
+    fun setOutSignalOffsetY(value: Int) = writeInt(Prefs.KEY_OUT_SIGNAL_OFFSET_Y, value)
+    fun setTypeSuffixScale(value: Int) = writeInt(Prefs.KEY_TYPE_SUFFIX_SCALE, value)
     fun setTypeWeight(value: Int) = writeInt(Prefs.KEY_TYPE_WEIGHT, value)
     fun setTrackAlpha(value: Int) = writeInt(Prefs.KEY_TRACK_ALPHA, value)
 
@@ -147,6 +152,11 @@ class SettingsRepository(context: Context) {
             prefs.putInt(Prefs.KEY_TYPE_SIZE, snapshot.typeSize)
             prefs.putInt(Prefs.KEY_OUT_TYPE_SIZE, snapshot.outTypeSize)
             prefs.putInt(Prefs.KEY_OUT_SIGNAL_SIZE, snapshot.outSignalSize)
+            prefs.putInt(Prefs.KEY_OUT_TYPE_MARGIN_LEFT, snapshot.outTypeMarginLeft)
+            prefs.putInt(Prefs.KEY_OUT_TYPE_MARGIN_RIGHT, snapshot.outTypeMarginRight)
+            prefs.putInt(Prefs.KEY_OUT_SIGNAL_OFFSET_X, snapshot.outSignalOffsetX)
+            prefs.putInt(Prefs.KEY_OUT_SIGNAL_OFFSET_Y, snapshot.outSignalOffsetY)
+            prefs.putInt(Prefs.KEY_TYPE_SUFFIX_SCALE, snapshot.typeSuffixScale)
             prefs.putInt(Prefs.KEY_TYPE_WEIGHT, snapshot.typeWeight)
             prefs.putInt(Prefs.KEY_TRACK_ALPHA, snapshot.trackAlpha)
 

@@ -961,6 +961,57 @@ private fun LazyListScope.geometryTab(
                     onValueChange = { v -> update { it.setOutTypeSize(v) } },
                 )
             }
+            // The trailing "A" of "5GA", shrunk against the main label. It is a
+            // property of the label itself rather than of either position, so
+            // its gate is "a network type is drawn somewhere" - and it stays
+            // live while the type is out of ring, where the label is a real
+            // TextView and both draws have to agree.
+            val suffixScaleHint = gateHint(
+                a.glyph to R.string.master_title,
+                a.typeAnywhere() to R.string.show_mobile_type_title,
+            )
+            TooltipBox(text = suffixScaleHint.orEmpty(), enabled = suffixScaleHint != null) {
+                IntSlider(
+                    value = settings.typeSuffixScale,
+                    min = Prefs.MIN_TYPE_SUFFIX_SCALE,
+                    max = Prefs.MAX_TYPE_SUFFIX_SCALE,
+                    title = stringResource(R.string.type_suffix_scale_title),
+                    summary = stringResource(R.string.type_suffix_scale_summary),
+                    enabled = a.glyph && a.typeAnywhere(),
+                    onValueChange = { v -> update { it.setTypeSuffixScale(v) } },
+                )
+            }
+            // The label's two margins. Same gate as its size: they only mean
+            // anything while the label is the status bar's own child, and the
+            // row names each margin by its physical side. Under RTL the pair
+            // swaps those sides, which the summary says rather than the row
+            // pretending the labels are reading-order starts.
+            val marginHint = gateHint(
+                a.glyph to R.string.master_title,
+                a.typeOutOfRing to R.string.show_mobile_type_title,
+            )
+            TooltipBox(text = marginHint.orEmpty(), enabled = marginHint != null) {
+                IntSlider(
+                    value = settings.outTypeMarginLeft,
+                    min = Prefs.MIN_OUT_TYPE_MARGIN,
+                    max = Prefs.MAX_OUT_TYPE_MARGIN,
+                    title = stringResource(R.string.out_type_margin_left_title),
+                    summary = stringResource(R.string.out_type_margin_left_summary),
+                    enabled = a.glyph && a.typeOutOfRing,
+                    onValueChange = { v -> update { it.setOutTypeMarginLeft(v) } },
+                )
+            }
+            TooltipBox(text = marginHint.orEmpty(), enabled = marginHint != null) {
+                IntSlider(
+                    value = settings.outTypeMarginRight,
+                    min = Prefs.MIN_OUT_TYPE_MARGIN,
+                    max = Prefs.MAX_OUT_TYPE_MARGIN,
+                    title = stringResource(R.string.out_type_margin_right_title),
+                    summary = stringResource(R.string.out_type_margin_right_summary),
+                    enabled = a.glyph && a.typeOutOfRing,
+                    onValueChange = { v -> update { it.setOutTypeMarginRight(v) } },
+                )
+            }
             // The size of the out-of-ring reading itself. It is authored against
             // neither design space and against no view either: the setting is a
             // plain dp, resolved against the display's density, so it is the same
@@ -990,6 +1041,37 @@ private fun LazyListScope.geometryTab(
                     summary = stringResource(R.string.out_signal_size_summary),
                     enabled = a.stackedOut(),
                     onValueChange = { v -> update { it.setOutSignalSize(v) } },
+                )
+            }
+            // Where the reading sits inside the row it was given. Same gate as
+            // its size - the nudge only has a reading to move while one is
+            // drawn - and the same four conditions, named for the hint.
+            TooltipBox(
+                text = outSignalSizeHint.orEmpty(),
+                enabled = outSignalSizeHint != null,
+            ) {
+                IntSlider(
+                    value = settings.outSignalOffsetX,
+                    min = Prefs.MIN_OUT_SIGNAL_OFFSET,
+                    max = Prefs.MAX_OUT_SIGNAL_OFFSET,
+                    title = stringResource(R.string.out_signal_offset_x_title),
+                    summary = stringResource(R.string.out_signal_offset_x_summary),
+                    enabled = a.stackedOut(),
+                    onValueChange = { v -> update { it.setOutSignalOffsetX(v) } },
+                )
+            }
+            TooltipBox(
+                text = outSignalSizeHint.orEmpty(),
+                enabled = outSignalSizeHint != null,
+            ) {
+                IntSlider(
+                    value = settings.outSignalOffsetY,
+                    min = Prefs.MIN_OUT_SIGNAL_OFFSET,
+                    max = Prefs.MAX_OUT_SIGNAL_OFFSET,
+                    title = stringResource(R.string.out_signal_offset_y_title),
+                    summary = stringResource(R.string.out_signal_offset_y_summary),
+                    enabled = a.stackedOut(),
+                    onValueChange = { v -> update { it.setOutSignalOffsetY(v) } },
                 )
             }
             // The weight still applies in both positions.
@@ -1906,8 +1988,14 @@ private const val NO_WIFI_LEVEL = -1
  */
 private val PREVIEW_SIZE = 39.dp
 
-/** Stand-in label for the no-Wi-Fi preview cell; the real one comes from SystemUI. */
-private const val MOBILE_TYPE_PREVIEW = "5G"
+/**
+ * Stand-in label for the type preview cells; the real one comes from SystemUI.
+ *
+ * <p>Deliberately the "5GA" form rather than "5G": the trailing A is what the
+ * suffix-scale row changes, so this is the only cell where that setting can be
+ * seen at all.
+ */
+private const val MOBILE_TYPE_PREVIEW = "5GA"
 
 /**
  * Stand-in per-SIM levels for the preview: SIM 1 one step down from SIM 2, so a
