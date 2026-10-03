@@ -7,6 +7,9 @@
 #
 # 版本号 -> versionCode 规则：major*10000 + minor*100 + patch（v1.0 -> 10000）。
 # 版本号可写 1、1.0 或 1.0.0，缺的段按 0 计；tag 名与所写的版本号一致。
+#
+# 发布成功后会自动清理旧 release：Releases 页面只留刚发布的这一版。
+# 只删 release 记录，**tag 一律保留**（历史源码快照仍可用 tag 定位）。
 
 [CmdletBinding()]
 param(
@@ -23,7 +26,10 @@ param(
     [switch]$DryRun,
 
     # 已存在同名 Release 时覆盖它（默认会报错停下）。
-    [switch]$Force
+    [switch]$Force,
+
+    # 保留历史 Release（默认只留最新版，删旧的不删 tag）。
+    [switch]$KeepOldReleases
 )
 
 $ErrorActionPreference = 'Stop'
@@ -132,6 +138,28 @@ function Get-GitHubToken {
     }
 }
 
+# 发布之后把仓库里的旧 Release 清掉，只留刚发布的这一版。
+# 删的只是 Release 记录：对应的 git tag 原样保留，历史源码快照依然能检出。
+function Remove-StaleReleases {
+    param(
+        [string]$ApiBase,
+        [hashtable]$Headers,
+        [int]$KeepId,
+        [string]$KeepTag
+    )
+    $all = Invoke-RestMethod -Uri "$ApiBase/releases?per_page=100" -Headers $Headers
+    $stale = @($all | Where-Object { $_.id -ne $KeepId -and -not $_.draft })
+    if ($stale.Count -eq 0) {
+        Write-Host '==> 没有需要清理的旧 Release' -ForegroundColor DarkGray
+        return
+    }
+    foreach ($r in $stale) {
+        Write-Host "==> 删除旧 Release $($r.tag_name)（tag 保留）" -ForegroundColor Yellow
+        Invoke-RestMethod -Method Delete -Uri "$ApiBase/releases/$($r.id)" -Headers $Headers | Out-Null
+    }
+    Write-Host "==> 已清理 $($stale.Count) 个旧 Release，现在只剩 $KeepTag" -ForegroundColor Green
+}
+
 $token = Get-GitHubToken
 $headers = @{
     Authorization = "token $token"
@@ -213,4 +241,14 @@ $uploaded = Invoke-RestMethod -Method Post `
 
 Write-Host "==> 已上传 $($uploaded.name)  $($uploaded.size) B" -ForegroundColor Green
 Write-Host "==> $($uploaded.browser_download_url)" -ForegroundColor Green
+
+# ---- 清理旧 Release ----------------------------------------------------------
+
+# 放在最后：新版本已经落盘、传完，清理失败也绝不会影响这次的发布成果。
+if ($KeepOldReleases) {
+    Write-Host '==> -KeepOldReleases：保留历史 Release' -ForegroundColor Yellow
+} else {
+    Remove-StaleReleases -ApiBase $api -Headers $headers -KeepId $release.id -KeepTag $tag
+}
+
 Write-Host "==> 设备上已装的旧版本现在可以在「关于 → 检查更新」里看到这个版本。"
