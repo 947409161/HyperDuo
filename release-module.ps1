@@ -1,6 +1,9 @@
 # HyperDuo - publish one release into the LSPosed module repository.
 #
-# Run this AFTER release.ps1: the main repo is the website / download home, while
+# release.ps1 calls this automatically at the end of a release, so one command
+# keeps both repos on the same version. It also stays runnable standalone, to
+# backfill a module-repo step that failed after the main repo already shipped.
+# The main repo is the website / download home, while
 # this puts the same APK where the LSPosed app looks for it. It is a separate
 # script because the module repo is a different repository with its own spec.
 #

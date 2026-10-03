@@ -10,6 +10,11 @@
 #
 # 发布成功后会自动清理旧 release：Releases 页面只留刚发布的这一版。
 # 只删 release 记录，**tag 一律保留**（历史源码快照仍可用 tag 定位）。
+#
+# 主仓发布成功后还会接着调 release-module.ps1，把同一 APK、同一份说明发到 LSPosed 模块仓
+# （Xposed-Modules-Repo/io.github.yixing233.hyperduo）——两个仓库必须同版本，模块页的
+# 下载链接走模块仓的 Release。只发主仓加 -SkipModuleRepo；模块仓那步失败不会撤回主仓，
+# 直接重跑 release-module.ps1 补齐即可（用法见该文件头注释）。
 
 [CmdletBinding()]
 param(
@@ -29,7 +34,10 @@ param(
     [switch]$Force,
 
     # 保留历史 Release（默认只留最新版，删旧的不删 tag）。
-    [switch]$KeepOldReleases
+    [switch]$KeepOldReleases,
+
+    # 只发主仓，跳过 Xposed 模块仓（默认两边都发，保持同版本）。
+    [switch]$SkipModuleRepo
 )
 
 $ErrorActionPreference = 'Stop'
@@ -244,11 +252,34 @@ Write-Host "==> $($uploaded.browser_download_url)" -ForegroundColor Green
 
 # ---- 清理旧 Release ----------------------------------------------------------
 
-# 放在最后：新版本已经落盘、传完，清理失败也绝不会影响这次的发布成果。
+# 新版本已经落盘、传完之后才做：清理失败也绝不会影响这次的发布成果。
 if ($KeepOldReleases) {
     Write-Host '==> -KeepOldReleases：保留历史 Release' -ForegroundColor Yellow
 } else {
     Remove-StaleReleases -ApiBase $api -Headers $headers -KeepId $release.id -KeepTag $tag
+}
+
+# ---- Xposed 模块仓 ------------------------------------------------------------
+
+# 主仓发完必须把同一 APK、同一份说明发到 LSPosed 模块仓：模块页的下载链接走模块仓的
+# Release，两个仓库版本一旦错开，从模块页进来的用户就会装到旧版。release-module.ps1
+# 自己负责校验 badging、上传 asset、同步 module-README.md、清理模块仓旧 Release。
+#
+# -Force / -KeepOldReleases 原样传递，两个仓库的覆盖与保留语义保持一致。
+# 这一步失败不会撤回主仓的 Release；说明为空时模块仓会拒绝发布 —— LSPosed 规范要求
+# Release 正文就是 changelog，所以发版必须带 -Notes 或 -NotesFile。
+if ($SkipModuleRepo) {
+    Write-Host '==> -SkipModuleRepo：跳过 Xposed 模块仓，只发主仓' -ForegroundColor Yellow
+} else {
+    $moduleArgs = @('-Version', $Version, '-VersionCode', $code, '-Apk', $target)
+    if ($Notes)           { $moduleArgs += @('-Notes', $Notes) }
+    if ($Force)           { $moduleArgs += '-Force' }
+    if ($KeepOldReleases) { $moduleArgs += '-KeepOldReleases' }
+    try {
+        & (Join-Path $PSScriptRoot 'release-module.ps1') @moduleArgs
+    } catch {
+        throw "Xposed 模块仓发布失败：$($_.Exception.Message)。主仓 Release 已发布成功；直接重跑 release-module.ps1 -Version $Version -VersionCode $code -Apk $target（说明传 -Notes 或 -NotesFile）即可补齐。"
+    }
 }
 
 Write-Host "==> 设备上已装的旧版本现在可以在「关于 → 检查更新」里看到这个版本。"
