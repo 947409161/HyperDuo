@@ -1,8 +1,8 @@
-package com.hyperduo.trio
+package io.github.yixing233.hyperduo
 
 import android.app.Application
 import android.util.Log
-import com.hyperduo.trio.ui.SettingsRepository
+import io.github.yixing233.hyperduo.ui.SettingsRepository
 import io.github.libxposed.service.XposedService
 import io.github.libxposed.service.XposedServiceHelper
 import java.util.concurrent.CopyOnWriteArraySet

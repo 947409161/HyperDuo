@@ -1,4 +1,4 @@
-package com.hyperduo.trio;
+package io.github.yixing233.hyperduo;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -93,6 +93,17 @@ public final class TrioConfig {
     /** Immutable view of every setting the renderer cares about. */
     static TrioSettings get() {
         return sSnapshot;
+    }
+
+    /**
+     * The same snapshot resolved into the drawing and suppression rules.
+     *
+     * <p>Convenience for the hook side, which reads it far more often than it
+     * reads a raw setting: {@code TrioAppearance.of(get())} at every call site
+     * was noisy enough that the rules started being re-derived by hand again.
+     */
+    static TrioAppearance appearance() {
+        return TrioAppearance.of(sSnapshot);
     }
 
     static boolean debugLog() {

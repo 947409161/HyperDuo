@@ -1,4 +1,4 @@
-package com.hyperduo.trio.ui
+package io.github.yixing233.hyperduo.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf

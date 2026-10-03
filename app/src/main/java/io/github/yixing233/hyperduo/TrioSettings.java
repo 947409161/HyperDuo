@@ -1,4 +1,4 @@
-package com.hyperduo.trio;
+package io.github.yixing233.hyperduo;
 
 import android.content.SharedPreferences;
 import android.os.Bundle;
@@ -37,6 +37,51 @@ public final class TrioSettings {
      * <p>Stored under the frozen key {@link Prefs#KEY_VALUE_CENTRED}.
      */
     public boolean valueCentred;
+    /**
+     * Which three-in-one layout is drawn: {@link Prefs#STYLE_RING} or
+     * {@link Prefs#STYLE_RECT}. Clamped to that range wherever it is read.
+     *
+     * <p>Both arrangements read the same keys, but they are not interchangeable:
+     * the rectangular one ignores {@link #valueCentred} (its value has a fixed
+     * place) and reads {@link #arcStroke} as the Wi-Fi arcs' stroke width, which
+     * also decides their vertical position. {@link TrioAppearance} is where those
+     * differences are resolved, so nothing else has to know them.
+     */
+    public int trioStyle;
+    /**
+     * Draws one row of level dots per SIM - SIM 1 on top, SIM 2 below - instead
+     * of a single row for the current data SIM.
+     *
+     * <p>Only ever honoured while no Wi-Fi ink is on screen and no charger is
+     * plugged in, because a plugged-in phone already says so with the ring's
+     * colour, and one state should read as one reading - see
+     * {@link TrioAppearance#dualSimRows(boolean, boolean, int)}.
+     */
+    public boolean dualSim;
+    /**
+     * Where the mobile signal is drawn: {@link Prefs#SIGNAL_IN_RING} or
+     * {@link Prefs#SIGNAL_OUT_RING}. Clamped to that range wherever it is read.
+     *
+     * <p>Outside the glyph {@link #stackedSignal} decides what stands in the
+     * signal's place - see {@link TrioAppearance#stackedOut}.
+     */
+    public int signalMode;
+    /**
+     * Draws the out-of-ring signal as four ascending capsule bars for one SIM
+     * over four dots for the other, instead of letting MIUI keep its own icon.
+     *
+     * <p>Only meaningful while {@link #signalMode} is
+     * {@link Prefs#SIGNAL_OUT_RING}.
+     */
+    public boolean stackedSignal;
+    /**
+     * Draws only the current data SIM, leaving the other out of the out-of-ring
+     * reading entirely.
+     *
+     * <p>Only meaningful while {@link #stackedSignal} is on: with the native
+     * icon in place the module draws no signal for this to narrow.
+     */
+    public boolean dataSimOnly;
 
     public boolean roleColors;
     public int criticalOnDark;
@@ -80,6 +125,11 @@ public final class TrioSettings {
         s.showBolt = Prefs.DEF_SHOW_BOLT;
         s.mobileTypeMode = Prefs.DEF_MOBILE_TYPE_MODE;
         s.valueCentred = Prefs.DEF_VALUE_CENTRED;
+        s.trioStyle = Prefs.DEF_TRIO_STYLE;
+        s.dualSim = Prefs.DEF_DUAL_SIM;
+        s.signalMode = Prefs.DEF_SIGNAL_MODE;
+        s.stackedSignal = Prefs.DEF_STACKED_SIGNAL;
+        s.dataSimOnly = Prefs.DEF_DATA_SIM_ONLY;
 
         s.roleColors = Prefs.DEF_ROLE_COLORS;
         s.criticalOnDark = Prefs.DEF_COLOR_CRITICAL_ON_DARK;
@@ -115,6 +165,15 @@ public final class TrioSettings {
         s.showBolt = p.getBoolean(Prefs.KEY_SHOW_BOLT, Prefs.DEF_SHOW_BOLT);
         s.mobileTypeMode = readMobileTypeMode(p);
         s.valueCentred = p.getBoolean(Prefs.KEY_VALUE_CENTRED, Prefs.DEF_VALUE_CENTRED);
+        s.trioStyle = Prefs.clamp(
+                p.getInt(Prefs.KEY_TRIO_STYLE, Prefs.DEF_TRIO_STYLE),
+                Prefs.MIN_TRIO_STYLE, Prefs.MAX_TRIO_STYLE);
+        s.dualSim = p.getBoolean(Prefs.KEY_DUAL_SIM, Prefs.DEF_DUAL_SIM);
+        s.signalMode = Prefs.clamp(
+                p.getInt(Prefs.KEY_SIGNAL_MODE, Prefs.DEF_SIGNAL_MODE),
+                Prefs.MIN_SIGNAL_MODE, Prefs.MAX_SIGNAL_MODE);
+        s.stackedSignal = p.getBoolean(Prefs.KEY_STACKED_SIGNAL, Prefs.DEF_STACKED_SIGNAL);
+        s.dataSimOnly = p.getBoolean(Prefs.KEY_DATA_SIM_ONLY, Prefs.DEF_DATA_SIM_ONLY);
 
         s.roleColors = p.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = p.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -208,6 +267,11 @@ public final class TrioSettings {
         s.showBolt = showBolt;
         s.mobileTypeMode = mobileTypeMode;
         s.valueCentred = valueCentred;
+        s.trioStyle = trioStyle;
+        s.dualSim = dualSim;
+        s.signalMode = signalMode;
+        s.stackedSignal = stackedSignal;
+        s.dataSimOnly = dataSimOnly;
 
         s.roleColors = roleColors;
         s.criticalOnDark = criticalOnDark;
@@ -256,6 +320,11 @@ public final class TrioSettings {
             case Prefs.KEY_SHOW_BOLT: showBolt = src.showBolt; return true;
             case Prefs.KEY_MOBILE_TYPE_MODE: mobileTypeMode = src.mobileTypeMode; return true;
             case Prefs.KEY_VALUE_CENTRED: valueCentred = src.valueCentred; return true;
+            case Prefs.KEY_TRIO_STYLE: trioStyle = src.trioStyle; return true;
+            case Prefs.KEY_DUAL_SIM: dualSim = src.dualSim; return true;
+            case Prefs.KEY_SIGNAL_MODE: signalMode = src.signalMode; return true;
+            case Prefs.KEY_STACKED_SIGNAL: stackedSignal = src.stackedSignal; return true;
+            case Prefs.KEY_DATA_SIM_ONLY: dataSimOnly = src.dataSimOnly; return true;
             case Prefs.KEY_ROLE_COLORS: roleColors = src.roleColors; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_DARK: criticalOnDark = src.criticalOnDark; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_LIGHT: criticalOnLight = src.criticalOnLight; return true;
@@ -297,6 +366,15 @@ public final class TrioSettings {
         s.showBolt = bundle.getBoolean(Prefs.KEY_SHOW_BOLT, Prefs.DEF_SHOW_BOLT);
         s.mobileTypeMode = readMobileTypeMode(bundle);
         s.valueCentred = bundle.getBoolean(Prefs.KEY_VALUE_CENTRED, Prefs.DEF_VALUE_CENTRED);
+        s.trioStyle = Prefs.clamp(
+                bundle.getInt(Prefs.KEY_TRIO_STYLE, Prefs.DEF_TRIO_STYLE),
+                Prefs.MIN_TRIO_STYLE, Prefs.MAX_TRIO_STYLE);
+        s.dualSim = bundle.getBoolean(Prefs.KEY_DUAL_SIM, Prefs.DEF_DUAL_SIM);
+        s.signalMode = Prefs.clamp(
+                bundle.getInt(Prefs.KEY_SIGNAL_MODE, Prefs.DEF_SIGNAL_MODE),
+                Prefs.MIN_SIGNAL_MODE, Prefs.MAX_SIGNAL_MODE);
+        s.stackedSignal = bundle.getBoolean(Prefs.KEY_STACKED_SIGNAL, Prefs.DEF_STACKED_SIGNAL);
+        s.dataSimOnly = bundle.getBoolean(Prefs.KEY_DATA_SIM_ONLY, Prefs.DEF_DATA_SIM_ONLY);
 
         s.roleColors = bundle.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = bundle.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -372,6 +450,11 @@ public final class TrioSettings {
         b.putBoolean(Prefs.KEY_SHOW_BOLT, showBolt);
         b.putInt(Prefs.KEY_MOBILE_TYPE_MODE, mobileTypeMode);
         b.putBoolean(Prefs.KEY_VALUE_CENTRED, valueCentred);
+        b.putInt(Prefs.KEY_TRIO_STYLE, trioStyle);
+        b.putBoolean(Prefs.KEY_DUAL_SIM, dualSim);
+        b.putInt(Prefs.KEY_SIGNAL_MODE, signalMode);
+        b.putBoolean(Prefs.KEY_STACKED_SIGNAL, stackedSignal);
+        b.putBoolean(Prefs.KEY_DATA_SIM_ONLY, dataSimOnly);
 
         b.putBoolean(Prefs.KEY_ROLE_COLORS, roleColors);
         b.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, criticalOnDark);

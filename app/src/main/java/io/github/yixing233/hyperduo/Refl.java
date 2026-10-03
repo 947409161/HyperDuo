@@ -1,4 +1,4 @@
-package com.hyperduo.trio;
+package io.github.yixing233.hyperduo;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;

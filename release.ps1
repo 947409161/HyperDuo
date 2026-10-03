@@ -1,4 +1,4 @@
-﻿# 本地发布：构建 release APK 并直接上传到 GitHub Release。
+# 本地发布：构建 release APK 并直接上传到 GitHub Release。
 #
 # 用法：
 #   .\release.ps1 -Version 1.1
@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 $Root    = 'C:\code\HyperDuo'
 $Tools   = Join-Path $Root '.tools'
 $Repo    = 'yixing233/HyperDuo'
-$Package = 'com.hyperduo.trio'
+$Package = 'io.github.yixing233.hyperduo'
 
 # 原生程序把进度和警告写到 stderr（git 的 "Everything up-to-date"、gradle 的弃用提示）。
 # 在 $ErrorActionPreference='Stop' 下，一旦把 stderr 并进管道，这些就变成终止错误，

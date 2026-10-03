@@ -7,16 +7,29 @@
     <string name="group_geometry">Geometry</string>
     <string name="group_colors">Colors</string>
 
+    <string name="group_stroke">Stroke</string>
+    <string name="group_text">Text</string>
+    <string name="group_type">Network type</string>
+    <string name="group_track">Track</string>
+
     <string name="tab_general">General</string>
 
     <string name="master_title">Enable trio icon</string>
     <string name="master_summary">Master switch. Turn off to restore the stock battery and signal icons.</string>
+
+    <string name="trio_style_title">Trio style</string>
+    <string name="trio_style_summary">Which arrangement to draw. The ring is the default; the rectangular one puts a column of signal dots on each side of the centre and a battery bar across the bottom.</string>
+    <string name="trio_style_ring">Ring</string>
+    <string name="trio_style_rect">Rectangular</string>
 
     <string name="show_wifi_title">Show Wi-Fi arcs</string>
     <string name="show_wifi_summary">Draw the Wi-Fi arcs; the number of arcs follows the real signal level. Turn off to send the stock Wi-Fi icon back to its usual place in the status bar.</string>
 
     <string name="show_mobile_title">Show mobile dots</string>
     <string name="show_mobile_summary">Draw four level dots for mobile network signal strength. Turn off to send the stock mobile icon back to its usual place in the status bar.</string>
+
+    <string name="dual_sim_title">Dual-SIM signal</string>
+    <string name="dual_sim_summary">With no Wi-Fi and not charging, draw two rows of dots instead of one: SIM 1 on top, SIM 2 below. Only applies when both SIMs are present and readable; a single SIM, or while charging, still draws one row for the current data SIM.</string>
 
     <string name="show_value_title">Show battery number</string>
     <string name="show_value_summary">Show the battery percentage inside the ring; replaced by a bolt while charging. Turn off to give the charging bolt back to the system as well.</string>
@@ -29,6 +42,17 @@
     <string name="mobile_type_off">Off</string>
     <string name="mobile_type_inside">In the ring</string>
     <string name="mobile_type_outside">Outside the ring</string>
+
+    <string name="signal_mode_title">Signal position</string>
+    <string name="signal_mode_summary">Where the mobile signal reading lives. Inside the ring keeps the level dots along the bottom of the icon; outside moves it beside the battery icon, in whichever form the switch below selects.</string>
+    <string name="signal_mode_inside">Inside the ring</string>
+    <string name="signal_mode_outside">Outside the ring</string>
+
+    <string name="stacked_signal_title">Stacked signal</string>
+    <string name="stacked_signal_summary">Draw the reading yourself while it is outside the ring: four bars of increasing height for one SIM, a row of dots below them for the other. With a single SIM, only the bars are drawn. Turned off, the system\'s own mobile signal icon is kept.</string>
+
+    <string name="data_sim_only_title">Data SIM only</string>
+    <string name="data_sim_only_summary">With two SIMs, draw only the reading of the SIM that carries data and leave the other one out. A single SIM, or one whose data SIM cannot be read, is unaffected.</string>
 
     <string name="value_centre_title">Centre the percentage</string>
     <string name="value_centre_summary">Enlarge the percentage into the middle of the ring and always keep it there. The Wi-Fi arcs shrink into the top notch, a smaller bolt takes the notch while charging (the arcs are then dropped), and an in-ring network type moves into the notch too.</string>
@@ -47,16 +71,18 @@
     <string name="color_reset_summary">Restore the three state colors to their factory presets.</string>
     <string name="color_reset_dialog_summary">All three state colors go back to their factory presets; your custom colors will be overwritten.</string>
     <string name="color_reset_confirm">Reset</string>
-    <string name="color_preview">Preview</string>
 
     <string name="low_threshold_title">Low battery threshold</string>
     <string name="low_threshold_summary">Switch to the low battery color below this percentage.</string>
 
     <string name="stroke_title">Ring stroke</string>
     <string name="stroke_summary">Stroke width of the battery ring.</string>
+    <string name="stroke_title_rect">Bar thickness</string>
+    <string name="stroke_summary_rect">Thickness of the battery bar along the bottom.</string>
 
     <string name="arc_stroke_title">Arc stroke</string>
     <string name="arc_stroke_summary">Stroke width of the Wi-Fi arcs.</string>
+    <string name="arc_stroke_summary_rect">Stroke width of the Wi-Fi arcs, and the vertical position of the group inside the top slot.</string>
 
     <string name="value_size_title">Number size</string>
     <string name="value_size_summary">Font size of the battery percentage.</string>
@@ -67,8 +93,8 @@
     <string name="type_size_title">Network type size</string>
     <string name="type_size_summary">Font size of the 3G/4G/5G label in the ring centre.</string>
 
-    <string name="out_type_size_title">Out-of-ring size</string>
-    <string name="out_type_size_summary">Font size of the 3G/4G/5G label shown outside the ring, in the status bar.</string>
+    <string name="out_type_size_title">Out-of-ring type size</string>
+    <string name="out_type_size_summary">Font size of the 3G/4G/5G label shown outside the ring, in the status bar. That label is drawn by the status bar itself, so the matching preview cell here is the only place its size is visible.</string>
 
     <string name="type_weight_title">Network type weight</string>
     <string name="type_weight_summary">Stroke weight of the network type, 100 lightest to 900 heaviest.</string>
@@ -92,6 +118,8 @@
     <string name="preview_no_wifi">No Wi-Fi</string>
     <string name="preview_low">Saver</string>
     <string name="preview_critical">Critical</string>
+    <string name="preview_out_type">Out type</string>
+    <string name="preview_out_signal">Out signal</string>
     <string name="about_title">About</string>
     <string name="about_summary">HyperDuo · an iPhone-Duo style trio status bar icon</string>
 
@@ -120,6 +148,8 @@
     <string name="update_permission_needed">HyperDuo needs permission to install apps; the settings page has been opened for you.</string>
     <string name="update_install_failed">No app on this device can handle the install.</string>
     <string name="update_release_page">Open release page</string>
+    <string name="update_repo">View repository</string>
+    <string name="update_repo_summary">Read the source and the docs on GitHub.</string>
 
     <string name="restart_title">Restart System UI</string>
     <string name="restart_summary">Restarting System UI reloads the module, which is what to do after installing it or when System UI misbehaves. It needs root access; System UI disappears for a moment and comes back on its own, without interrupting running apps.</string>

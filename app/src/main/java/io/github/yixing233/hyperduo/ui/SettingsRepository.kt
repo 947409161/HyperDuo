@@ -1,13 +1,13 @@
-package com.hyperduo.trio.ui
+package io.github.yixing233.hyperduo.ui
 
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.content.edit
-import com.hyperduo.trio.HyperDuoApp
-import com.hyperduo.trio.Prefs
-import com.hyperduo.trio.TrioSettings
+import io.github.yixing233.hyperduo.HyperDuoApp
+import io.github.yixing233.hyperduo.Prefs
+import io.github.yixing233.hyperduo.TrioSettings
 import io.github.libxposed.service.XposedService
 
 /**
@@ -46,9 +46,16 @@ class SettingsRepository(context: Context) {
     fun setShowMobile(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_MOBILE, value)
     fun setShowValue(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_VALUE, value)
     fun setShowBolt(value: Boolean) = writeBoolean(Prefs.KEY_SHOW_BOLT, value)
+    fun setDualSim(value: Boolean) = writeBoolean(Prefs.KEY_DUAL_SIM, value)
     fun setValueCentred(value: Boolean) = writeBoolean(Prefs.KEY_VALUE_CENTRED, value)
     /** 0 = hidden, 1 = inside the ring, 2 = outside it. */
     fun setMobileTypeMode(value: Int) = writeInt(Prefs.KEY_MOBILE_TYPE_MODE, value)
+    /** 0 = the ring arrangement, 1 = the rectangular one. */
+    fun setTrioStyle(value: Int) = writeInt(Prefs.KEY_TRIO_STYLE, value)
+    /** 0 = the signal readings stay inside the ring, 1 = they move outside it. */
+    fun setSignalMode(value: Int) = writeInt(Prefs.KEY_SIGNAL_MODE, value)
+    fun setStackedSignal(value: Boolean) = writeBoolean(Prefs.KEY_STACKED_SIGNAL, value)
+    fun setDataSimOnly(value: Boolean) = writeBoolean(Prefs.KEY_DATA_SIM_ONLY, value)
 
     // ----------------------------------------------------------------- colours
 
@@ -115,8 +122,13 @@ class SettingsRepository(context: Context) {
             prefs.putBoolean(Prefs.KEY_SHOW_MOBILE, snapshot.showMobile)
             prefs.putBoolean(Prefs.KEY_SHOW_VALUE, snapshot.showValue)
             prefs.putBoolean(Prefs.KEY_SHOW_BOLT, snapshot.showBolt)
+            prefs.putBoolean(Prefs.KEY_DUAL_SIM, snapshot.dualSim)
             prefs.putInt(Prefs.KEY_MOBILE_TYPE_MODE, snapshot.mobileTypeMode)
             prefs.putBoolean(Prefs.KEY_VALUE_CENTRED, snapshot.valueCentred)
+            prefs.putInt(Prefs.KEY_TRIO_STYLE, snapshot.trioStyle)
+            prefs.putInt(Prefs.KEY_SIGNAL_MODE, snapshot.signalMode)
+            prefs.putBoolean(Prefs.KEY_STACKED_SIGNAL, snapshot.stackedSignal)
+            prefs.putBoolean(Prefs.KEY_DATA_SIM_ONLY, snapshot.dataSimOnly)
 
             prefs.putBoolean(Prefs.KEY_ROLE_COLORS, snapshot.roleColors)
             prefs.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, snapshot.criticalOnDark)

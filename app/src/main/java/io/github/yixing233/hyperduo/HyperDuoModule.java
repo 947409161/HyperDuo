@@ -1,4 +1,4 @@
-package com.hyperduo.trio;
+package io.github.yixing233.hyperduo;
 
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;

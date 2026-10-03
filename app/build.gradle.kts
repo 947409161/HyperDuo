@@ -12,11 +12,18 @@ val tagVersionName = (findProperty("hyperduoVersionName") as String?)?.takeIf { 
 val tagVersionCode = (findProperty("hyperduoVersionCode") as String?)?.toIntOrNull()
 
 android {
-    namespace = "com.hyperduo.trio"
+    // io.github.* because LSPosed's module repo verifies a reverse-domain id
+    // against a DNS TXT record for the root domain: hyperduo.com is registered
+    // by someone else, so anything under it would fail the check. The
+    // io.github.<user> form needs no domain and no TXT record.
+    namespace = "io.github.yixing233.hyperduo"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.hyperduo.trio"
+        // Changing this makes the module a different app to Android: an existing
+        // com.hyperduo.trio install cannot be updated in place, and its settings
+        // and LSPosed scope entry do not carry over. Uninstall the old one first.
+        applicationId = "io.github.yixing233.hyperduo"
         minSdk = 29
         targetSdk = 36
         versionCode = tagVersionCode ?: 2

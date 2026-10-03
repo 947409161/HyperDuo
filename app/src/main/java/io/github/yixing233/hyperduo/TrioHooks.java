@@ -1,4 +1,4 @@
-package com.hyperduo.trio;
+package io.github.yixing233.hyperduo;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -145,15 +145,19 @@ final class TrioHooks {
      * the battery view, handed back through {@link #BOLT_STYLE}.
      */
     private static List<String> foldedSlots() {
-        final TrioSettings cfg = TrioConfig.get();
-        if (!cfg.enabled) {
+        final TrioAppearance a = TrioConfig.appearance();
+        if (!a.glyph) {
             return Collections.emptyList();
         }
         final List<String> slots = new ArrayList<>(MANAGED_SLOTS.size());
-        if (cfg.showWifi) {
+        if (a.wifi) {
             slots.addAll(WIFI_SLOTS);
         }
-        if (cfg.showMobile) {
+        // The mobile slot is folded exactly while the module draws the signal
+        // itself: as the glyph's dots, or as the out-of-ring reading. Leaving it
+        // in place out of ring with the stacked switch off is what keeps MIUI's
+        // own icon on screen, which is the whole difference the switch makes.
+        if (a.foldsMobile()) {
             slots.addAll(MOBILE_SLOTS);
         }
         return slots;
@@ -330,8 +334,8 @@ final class TrioHooks {
             });
             return;
         }
-        final boolean enabled = TrioConfig.get().enabled;
-        final TrioSettings cfg = TrioConfig.get();
+        final TrioAppearance a = TrioAppearance.of(TrioConfig.get());
+        final boolean enabled = a.glyph;
         final List<TrioState> hosts;
         synchronized (HOSTS) {
             hosts = new ArrayList<TrioState>(HOSTS);
@@ -343,8 +347,8 @@ final class TrioHooks {
         if (debugLog()) {
             log(LOG_INFO, "config changed, hosts=" + hosts.size()
                     + " enabled=" + enabled
-                    + " ring=" + cfg.ringStroke + " arc=" + cfg.arcStroke
-                    + " size=" + cfg.valueSize);
+                    + " ring=" + a.ringStroke + " arc=" + a.arcStroke
+                    + " size=" + a.valueSize);
         }
         for (int i = 0; i < hosts.size(); i++) {
             final View v = hosts.get(i).host;
@@ -368,6 +372,7 @@ final class TrioHooks {
                     // rather than called inline because it may add a view, which
                     // must never happen inside a layout pass - and this runnable
                     // is already the deferred slot the rest of the re-fold uses.
+                    syncOutSignal(v);
                     syncOutTypeLabel(v);
                     v.invalidate();
                 }
@@ -457,9 +462,9 @@ final class TrioHooks {
      *
      * <p>The charging bolt is the one native element this module draws itself, so
      * it is the one element with a rule: the stock bolt stays out of the way only
-     * while the glyph actually draws its own, which per {@code TrioRenderer} is
-     * {@code showBolt && showValue} while charging. Turn either toggle off and the
-     * stock bolt belongs to MIUI again.
+     * while the glyph actually draws its own, which
+     * {@link TrioAppearance#hidesNativeBolt} states once for every caller. Turn
+     * either toggle off and the stock bolt belongs to MIUI again.
      *
      * <p>Handing it back cannot just mean un-hiding it. {@code updateChargeAndText}
      * is MIUI's authority on whether the bolt belongs on screen - it hides it when
@@ -473,11 +478,11 @@ final class TrioHooks {
      * native text is wanted, so switching the module off leaves MIUI in charge.
      */
     private static void applyMeterText(List<View> meters) {
-        final TrioSettings cfg = TrioConfig.get();
-        final boolean glyphBolt = cfg.enabled && cfg.showBolt && cfg.showValue;
+        final TrioAppearance a = TrioAppearance.of(TrioConfig.get());
+        final boolean nativeBolt = !a.hidesNativeBolt();
+        final boolean glyphOn = a.glyph;
         for (int i = 0; i < meters.size(); i++) {
             final View meter = meters.get(i);
-            final boolean nativeBolt = !glyphBolt;
             meter.post(new Runnable() {
                 @Override
                 public void run() {
@@ -490,7 +495,7 @@ final class TrioHooks {
                     // The percentage text is ours to hide the whole time the
                     // module is on, whichever sub-toggles are set.
                     final Object percent = Refl.get(sPercentContainerField, meter);
-                    if (cfg.enabled) {
+                    if (glyphOn) {
                         hide(percent);
                     } else {
                         showIfHidden(percent);
@@ -716,7 +721,14 @@ final class TrioHooks {
                             // SystemUI context when this generation was loaded
                             // after the view tree had already been inflated.
                             TrioConfig.installReceiver(((View) self).getContext());
+                            // The per-SIM signal sampler needs the same context to
+                            // reach telephony; it is the drawing path that needs it,
+                            // so it is handed over here rather than at hook install
+                            // time, when there may be no context at all.
+                            TrioState.attachContext(((View) self).getContext());
                         }
+                        // Just the master switch: whether to paint at all. The
+                        // renderer resolves the rest of the switches itself.
                         if (self instanceof View && canvasArg instanceof Canvas
                                 && TrioConfig.get().enabled) {
                             final View host = (View) self;
@@ -786,12 +798,12 @@ final class TrioHooks {
                         if (self instanceof View) {
                             rememberMeter((View) self);
                         }
-                        final TrioSettings cfg = TrioConfig.get();
+                        final TrioAppearance appearance = TrioConfig.appearance();
                         // The stock bolt is ours to suppress exactly while the
-                        // glyph draws its own, which per TrioRenderer is
-                        // showBolt && showValue.
-                        final boolean glyphBolt = cfg.enabled && cfg.showBolt && cfg.showValue;
-                        if (!cfg.enabled) {
+                        // glyph draws its own, which is one rule and lives in
+                        // one place now.
+                        final boolean glyphBolt = appearance.hidesNativeBolt();
+                        if (!appearance.glyph) {
                             // Nothing of ours is involved: pass the real style
                             // through and leave MIUI's own bolt alone.
                             //
@@ -837,8 +849,8 @@ final class TrioHooks {
                         if (self instanceof View) {
                             rememberMeter((View) self);
                         }
-                        final TrioSettings cfg = TrioConfig.get();
-                        if (cfg.enabled && cfg.showBolt && cfg.showValue) {
+                        final TrioAppearance appearance = TrioConfig.appearance();
+                        if (appearance.hidesNativeBolt()) {
                             // The glyph draws the bolt, so MIUI's own copy of it
                             // must not show up next to the ring.
                             hide(Refl.get(sChargingViewField, self));
@@ -846,7 +858,7 @@ final class TrioHooks {
                         // Otherwise MIUI's own decision stands: handBackBolt and
                         // the module's own hand-back leave the visibility to this
                         // method, and re-hiding here would undo them.
-                        if (cfg.enabled) {
+                        if (appearance.glyph) {
                             // The percentage container is only measured and shown
                             // at battery style 3, which the module never asks for,
                             // so it is ours to hide for as long as we are on.
@@ -943,8 +955,18 @@ final class TrioHooks {
                         if (raw instanceof Number) {
                             TrioState.noteSignalIcon(
                                     resources(), ((Number) raw).intValue());
+                            // MIUI only re-applies an icon when the reading behind
+                            // it changed, so this is the event that says the
+                            // per-SIM levels are stale. The icons name no SIM, so
+                            // telephony is asked directly - and only when a
+                            // per-SIM reading is actually wanted: the glyph's
+                            // second row, or the out-of-ring stacked reading.
+                            final boolean simsMoved = (TrioConfig.get().dualSim
+                                    || TrioConfig.appearance().stackedOut())
+                                    && TrioState.pollSimsNow();
                             if (beforeWifi != TrioState.sWifiLevel
-                                    || beforeMobile != TrioState.sMobileLevel) {
+                                    || beforeMobile != TrioState.sMobileLevel
+                                    || simsMoved) {
                                 invalidateHosts();
                             }
                         }
@@ -1059,6 +1081,9 @@ final class TrioHooks {
         }
         // Refresh-only: this runs inside onLayout, so it may reposition the
         // label but must never add or remove one.
+        // The reading first: the label stands against it when it is mounted, so
+        // placing the label before it would place it against last frame's frame.
+        refreshOutSignal(container);
         refreshOutTypeLabel(container);
         final List<String> wanted = foldedSlots();
         final int count = container.getChildCount();
@@ -1512,6 +1537,9 @@ final class TrioHooks {
                 @Override
                 public void run() {
                     foldHostContainer(host);
+                    // The reading is mounted and measured before the label, since
+                    // the label stands outside it whenever it is present.
+                    syncOutSignal(host);
                     syncOutTypeLabel(host);
                 }
             });
@@ -1557,7 +1585,10 @@ final class TrioHooks {
                 public void run() {
                     // The type string is sampled from a drawable's measure(), so
                     // this is the only path that can carry a changed "5G"/"5GA"
-                    // through to a label the glyph canvas does not own.
+                    // through to a label the glyph canvas does not own. Readings
+                    // arrive here too: a SIM returning or the data SIM changing
+                    // moves the bars without any draw pass of the glyph.
+                    syncOutSignal(v);
                     syncOutTypeLabel(v);
                     v.invalidate();
                 }
@@ -1719,9 +1750,8 @@ final class TrioHooks {
             return;
         }
         final ViewGroup container = (ViewGroup) owner;
-        final TrioSettings cfg = TrioConfig.get();
-        final boolean wanted = cfg.enabled
-                && cfg.mobileTypeMode == Prefs.MOBILE_TYPE_OUT_RING;
+        final TrioAppearance a = TrioConfig.appearance();
+        final boolean wanted = a.glyph && a.typeOutOfRing;
         OutTypeLabel label = findOutTypeLabel(container);
         if (!wanted) {
             removeOutTypeLabel(container);
@@ -1781,8 +1811,8 @@ final class TrioHooks {
         }
         // Only a guard: inkScale() is 0 exactly when the host has no measured
         // size, and the label cannot be positioned against an unmeasured meter.
-        // The text size no longer comes from the ink scale - it is MIUI's own
-        // status-bar size, which is already in screen pixels.
+        // The text size no longer comes from the ink scale at all - it is the
+        // user's own Out-of-ring size, already in screen pixels.
         if (TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
             return;
         }
@@ -1827,7 +1857,7 @@ final class TrioHooks {
      * is Out of ring, a host is registered and that host has been measured.
      */
     private static void requestOutTypeSync(final ViewGroup container) {
-        if (TrioConfig.get().mobileTypeMode != Prefs.MOBILE_TYPE_OUT_RING) {
+        if (TrioConfig.appearance().typeOutOfRing) {
             return;
         }
         final View host = hostIn(container);
@@ -1902,11 +1932,14 @@ final class TrioHooks {
         } catch (Throwable ignored) {
             // a container torn down under us is not worth crashing over
         }
+        // The reading may still be mounted and still need its strip; the release
+        // above cannot tell, so the total is recomputed.
+        reserveOutRingStrip(group);
     }
 
     private static void updateOutTypeLabel(ViewGroup container, OutTypeLabel label,
                                            View host, View anchor) {
-        final TrioSettings cfg = TrioConfig.get();
+        final TrioAppearance a = TrioConfig.appearance();
         final TrioState state = stateFor(host);
         if (state != null) {
             // Pull the status values in before reading them: this runs from a
@@ -1922,9 +1955,15 @@ final class TrioHooks {
             // holding it open with nothing in it would just leave a hole in the
             // status bar.
             releaseOutTypeSpace(container);
+            if (label.getTranslationX() != 0f) {
+                label.setTranslationX(0f);
+            }
             if (label.getVisibility() != View.GONE) {
                 label.setVisibility(View.GONE);
             }
+            // The reading may still be mounted and still need its strip; the
+            // bookkeeping above cannot tell, so it is asked.
+            reserveOutRingStrip(container);
             return;
         }
         if (!text.contentEquals(label.getText())) {
@@ -1933,14 +1972,14 @@ final class TrioHooks {
         // Its own setting, not the in-ring type_size: that one is authored for
         // the ring canvas' 120x120 design space and comes out far too small
         // once the label stands in the status bar's real pixel space.
-        final float size = cfg.outTypeSize;
+        final float size = a.outTypeSize;
         if (label.getTextSize() != size) {
             // PX, not the SP that the one-argument overload would use: the
             // status bar lays out in raw pixels, so the value is applied as-is
             // rather than scaled by the user's font-size setting.
             label.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
         }
-        final Typeface typeface = TrioRenderer.typefaceFor(cfg.typeWeight);
+        final Typeface typeface = TrioRenderer.typefaceFor(a.typeWeight);
         if (label.getTypeface() != typeface) {
             label.setTypeface(typeface);
         }
@@ -1956,8 +1995,9 @@ final class TrioHooks {
         // Measured first, because the strip the native row has to give up is the
         // label's own width plus the gap on either side of it. Without it the row
         // lays its icons all the way to the end and paints over the label.
-        reserveOutTypeSpace(container, label.getMeasuredWidth() + 2 * outLabelGap(container));
-        placeOutTypeLabel(container, label, anchor);
+        // reserveOutRingStrip counts the reading too, when one is mounted.
+        reserveOutRingStrip(container);
+        placeOutTypeLabel(container, label, labelAnchorIn(container, anchor));
         if (debugLog()) {
             log(LOG_INFO, "out type: \"" + text + "\" size=" + size
                     + " label=" + label.getWidth() + "x" + label.getHeight()
@@ -2010,6 +2050,17 @@ final class TrioHooks {
             }
         }
         label.layout(left, top, left + width, top + height);
+        // The anchor only moves when the battery itself does, and the battery
+        // never moves for the island - MIUI slides the icon row instead. So the
+        // frame laid out above is the island-free position, and the island is
+        // applied afterwards as a translation of that same frame, exactly the
+        // way the container translates its own children. Keeping it out of the
+        // layout maths means the two paths never have to agree on a number:
+        // whatever shift the row took, the label takes the same one.
+        final float shift = islandShiftPx(container);
+        if (label.getTranslationX() != -shift) {
+            label.setTranslationX(-shift);
+        }
     }
 
     /** The gap the label keeps from the icons and from the battery meter. */
@@ -2025,6 +2076,60 @@ final class TrioHooks {
     private static View iconContainerIn(View batteryContainer) {
         final Object icons = Refl.get(sStatusIconField, batteryContainer);
         return (icons instanceof View) ? (View) icons : null;
+    }
+
+    /**
+     * How far MIUI's own icon row has been pushed inward by the expanded super
+     * island, in pixels, or 0 when no island is in the way.
+     *
+     * <p>{@code MiuiStatusIconContainer} keeps an {@code _islandMonitor} whose
+     * {@code getIslandWidth()} is that distance: the container's own
+     * {@code onLayout} reads it back (through its private
+     * {@code getIslandTranslationX()}) and, while it is positive, slides every
+     * native icon whose position falls inside it out of the way instead of
+     * hiding it under the island. A null monitor and a blocked one both mean
+     * "no island", and MIUI signals that with -1 - anything non-positive is
+     * therefore treated as zero here.
+     *
+     * <p>The label is not a {@code StatusIconDisplayable} and never enters the
+     * container's {@code layoutStates}, so that pass knows nothing about it and
+     * leaves it exactly where it was. Reading the same number lets the label
+     * make the same move the row did, which is what keeps it beside the icons
+     * rather than under the island.
+     *
+     * <p>Read-only and callable from anywhere: it only reads a field and invokes
+     * a getter, so unlike {@code setPadding} it is safe inside a layout pass.
+     */
+    private static int islandShiftPx(View iconContainer) {
+        if (iconContainer == null) {
+            return 0;
+        }
+        try {
+            final Class<?> cls = iconContainer.getClass();
+            final Field monitorField = Refl.field(cls, "_islandMonitor");
+            if (monitorField == null) {
+                return 0;
+            }
+            final Object monitor = Refl.get(monitorField, iconContainer);
+            if (monitor == null) {
+                return 0;
+            }
+            final Method blocked = Refl.method(monitor.getClass(), "getBlocked");
+            if (blocked != null && Boolean.TRUE.equals(Refl.invoke(blocked, monitor))) {
+                return 0;
+            }
+            final Method width = Refl.method(monitor.getClass(), "getIslandWidth");
+            if (width == null) {
+                return 0;
+            }
+            final Object value = Refl.invoke(width, monitor);
+            final int px = (value instanceof Integer) ? (Integer) value : 0;
+            return (px > 0) ? px : 0;
+        } catch (Throwable ignored) {
+            // A missing field or a renamed getter only costs the shift; the
+            // label still lands on the anchor, so there is nothing to report.
+            return 0;
+        }
     }
 
     /**
@@ -2090,6 +2195,313 @@ final class TrioHooks {
             return;
         }
         icons.setPadding(saved[0], icons.getPaddingTop(), saved[1], icons.getPaddingBottom());
+    }
+
+    // ---------------------------------------------------- out-of-ring signal
+
+    /**
+     * The out-of-ring SIM reading: four ascending capsule bars, and the dot row
+     * beneath them when both SIMs have a reading.
+     *
+     * <p>A {@link View} of our own rather than MIUI's signal icon. That icon is
+     * one icon for one reading, while this mode draws a reading per SIM and has
+     * to place them itself; and being our own class gives {@link #findOutSignal}
+     * a marker no MIUI view can match by accident.
+     *
+     * <p>It is mounted in the battery container, never in the icon container:
+     * {@code MiuiStatusIconContainer.onLayout} casts each of its children to
+     * {@code StatusIconDisplayable}, and a foreign child would crash the pass.
+     */
+    private static final class OutSignalView extends View {
+        /** The glyph host the reading and the icon colour come from. */
+        View host;
+        /** Bars to light, {@code 0..}{@link TrioGeometry#STACK_COLUMNS}. */
+        int bars;
+        /** Dots to light, or {@code -1} when there is no second reading. */
+        int dots = -1;
+
+        OutSignalView(Context context) {
+            super(context);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            final View source = host;
+            if (source == null) {
+                return;
+            }
+            // Read on every frame rather than cached: the row is invalidated
+            // when the tint changes, and that is exactly when this colour moves.
+            final TrioState state = stateFor(source);
+            final int fg = (state != null) ? state.foreground() : 0xFFFFFFFF;
+            TrioRenderer.drawOutSignal(canvas, getWidth(), getHeight(), bars, dots, fg,
+                    TrioConfig.appearance());
+        }
+    }
+
+    /**
+     * Mounts, updates or removes the out-of-ring reading for one glyph host.
+     *
+     * <p>Posted only, for the same reason as {@link #syncOutTypeLabel}: it may
+     * add a view, and this runnable runs from a layout pass otherwise.
+     */
+    private static void syncOutSignal(View host) {
+        if (host == null) {
+            return;
+        }
+        final Object owner = batteryContainerOf(host);
+        if (!(owner instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup container = (ViewGroup) owner;
+        final TrioAppearance a = TrioConfig.appearance();
+        final boolean wanted = a.stackedOut();
+        final OutSignalView view = findOutSignal(container);
+        if (!wanted) {
+            removeOutSignal(container);
+            return;
+        }
+        final View anchor = meterIn(host, container);
+        if (anchor == null) {
+            removeOutSignal(container);
+            return;
+        }
+        // Only a guard: inkScale() is 0 exactly when the host has not been
+        // measured yet, and an unmeasured meter has no frame to place against.
+        if (TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
+            removeOutSignal(container);
+            return;
+        }
+        final OutSignalView target = (view != null) ? view : createOutSignal(container);
+        target.host = host;
+        updateOutSignal(container, target, host, anchor);
+    }
+
+    /**
+     * Repositions an already-mounted reading. Runs inside the icon container's
+     * layout pass, so it may relayout the view but must never measure it: a
+     * re-measure schedules a layout, which is illegal from in there. Anything
+     * that would change its size is handed to the posted path instead.
+     */
+    private static void refreshOutSignal(ViewGroup iconContainer) {
+        final Object owner = batteryContainerOf(iconContainer);
+        if (!(owner instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup container = (ViewGroup) owner;
+        final OutSignalView view = findOutSignal(container);
+        if (view == null) {
+            requestOutSignalSync(container);
+            return;
+        }
+        final View host = view.host;
+        if (host == null || container.getWidth() <= 0 || container.getHeight() <= 0) {
+            return;
+        }
+        final View anchor = meterIn(host, container);
+        if (anchor == null) {
+            return;
+        }
+        if (TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
+            return;
+        }
+        if (anchor.getHeight() <= 0) {
+            return;
+        }
+        final int[] reading = new int[2];
+        outSignalReading(stateFor(host), reading);
+        if (reading[0] < 0) {
+            reading[0] = 0;
+        }
+        // Size changed - a SIM appearing or disappearing, or the row resizing -
+        // is a re-measure, so it goes back through the posted path.
+        if (view.bars != reading[0] || view.dots != reading[1]
+                || view.getMeasuredHeight() != anchor.getHeight()) {
+            requestOutSignalSync(container);
+            return;
+        }
+        // Shares the label's slot geometry: both stand outside the battery
+        // meter, one against the other, so they are placed by one routine.
+        placeOutTypeLabel(container, view, anchor);
+    }
+
+    /**
+     * Queues one {@link #syncOutSignal} for the host under {@code container},
+     * without ever queuing an empty one: the runnable is a no-op unless the
+     * module is drawing the reading itself and that host has been measured.
+     */
+    private static void requestOutSignalSync(final ViewGroup container) {
+        if (!TrioConfig.appearance().stackedOut()) {
+            return;
+        }
+        final View host = hostIn(container);
+        if (host == null
+                || TrioRenderer.inkScale(host.getWidth(), host.getHeight()) <= 0f) {
+            return;
+        }
+        final View target = host;
+        container.post(new Runnable() {
+            @Override
+            public void run() {
+                syncOutSignal(target);
+            }
+        });
+    }
+
+    /**
+     * The bars and dots a host's current readings resolve to.
+     *
+     * <p>One place asks the renderer, so the posted pass that measures the view
+     * and the layout pass that compares against it can never disagree about
+     * what the reading is.
+     */
+    private static void outSignalReading(TrioState state, int[] out) {
+        final int[] slots = (state != null) ? state.slotLevels : null;
+        final int mobile = (state != null) ? state.mobileLevel : -1;
+        TrioRenderer.outSignalLevels(TrioConfig.appearance().dataSimOnly, mobile, slots,
+                TrioState.sDataSlot, out);
+    }
+
+    private static OutSignalView findOutSignal(ViewGroup container) {
+        final int count = container.getChildCount();
+        for (int i = 0; i < count; i++) {
+            final View child;
+            try {
+                child = container.getChildAt(i);
+            } catch (Throwable ignored) {
+                continue;
+            }
+            if (child instanceof OutSignalView) {
+                return (OutSignalView) child;
+            }
+        }
+        return null;
+    }
+
+    private static OutSignalView createOutSignal(ViewGroup container) {
+        final OutSignalView view = new OutSignalView(container.getContext());
+        view.setVisibility(View.GONE);
+        // WRAP_CONTENT on both axes: the size is set explicitly by measuring
+        // against exact specs further down. MiuiStatusBatteryContainer.onMeasure
+        // only touches its three named fields, so whatever we measure stands.
+        container.addView(view, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        return view;
+    }
+
+    private static void removeOutSignal(View container) {
+        if (!(container instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup group = (ViewGroup) container;
+        final OutSignalView view = findOutSignal(group);
+        if (view == null) {
+            return;
+        }
+        try {
+            group.removeView(view);
+        } catch (Throwable ignored) {
+            // a container torn down under us is not worth crashing over
+        }
+        // The strip the reading held has to go back the moment it does, or the
+        // native icon row would keep laying out short of a view that is gone.
+        reserveOutRingStrip(group);
+    }
+
+    private static void updateOutSignal(ViewGroup container, OutSignalView view,
+                                        View host, View anchor) {
+        final TrioState state = stateFor(host);
+        if (state != null) {
+            // The snapshot is only as fresh as the last refresh(), and this runs
+            // from a posted runnable rather than from the draw path.
+            state.refresh();
+        }
+        final int[] reading = new int[2];
+        outSignalReading(state, reading);
+        // A reading telephony has not answered for yet is drawn unlit rather
+        // than absent. Folding the mobile slot has already happened by the time
+        // this runs, so hiding the view would leave a hole in the status bar
+        // until the modem answers - and four dark bars is also what MIUI itself
+        // draws for "no service".
+        if (reading[0] < 0) {
+            reading[0] = 0;
+        }
+        final int height = anchor.getHeight();
+        if (height <= 0) {
+            return;
+        }
+        final boolean dotRow = reading[1] >= 0;
+        final int width = TrioRenderer.outSignalWidth(height, dotRow);
+        if (width <= 0) {
+            return;
+        }
+        view.bars = reading[0];
+        view.dots = reading[1];
+        if (view.getVisibility() != View.VISIBLE) {
+            view.setVisibility(View.VISIBLE);
+        }
+        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+        // Measured first, then reserved: the strip the native row gives up is
+        // this view's width plus the label's, and the gap around both.
+        reserveOutRingStrip(container);
+        placeOutTypeLabel(container, view, anchor);
+        if (debugLog()) {
+            log(LOG_INFO, "out signal: bars=" + reading[0] + " dots=" + reading[1]
+                    + " view=" + view.getWidth() + "x" + view.getHeight()
+                    + " at " + view.getLeft() + "," + view.getTop()
+                    + " anchor=" + anchor.getLeft() + ".." + anchor.getRight()
+                    + " container=" + container.getWidth() + "x" + container.getHeight());
+        }
+    }
+
+    /**
+     * The view the out-of-ring label stands next to: the SIM reading when it is
+     * mounted, the battery meter otherwise.
+     *
+     * <p>That is MIUI's own reading order - network type, then signal, then
+     * battery - so the label is always the outermost of the two and the two
+     * never claim the same strip.
+     */
+    private static View labelAnchorIn(ViewGroup container, View meter) {
+        final OutSignalView signal = findOutSignal(container);
+        if (signal != null && signal.getVisibility() == View.VISIBLE) {
+            return signal;
+        }
+        return meter;
+    }
+
+    /**
+     * Gives the native icon row exactly the room the out-of-ring views need: the
+     * reading and the label, plus the gap that separates each from the next
+     * thing. With neither mounted the strip is handed back entirely.
+     *
+     * <p>Both callers use this rather than reserving for themselves, because the
+     * strip is one number: whichever view is updated last would otherwise decide
+     * the padding for both of them.
+     */
+    private static void reserveOutRingStrip(ViewGroup container) {
+        final int gap = outLabelGap(container);
+        final OutSignalView signal = findOutSignal(container);
+        final boolean signalOn = signal != null && signal.getVisibility() == View.VISIBLE;
+        final OutTypeLabel label = findOutTypeLabel(container);
+        final boolean labelOn = label != null && label.getVisibility() == View.VISIBLE;
+        int total = 0;
+        if (signalOn) {
+            total += signal.getMeasuredWidth() + gap;
+        }
+        if (labelOn) {
+            // The label keeps a gap on both sides only when it is alone; with
+            // the reading in front of it, the gap between the two is already
+            // counted above.
+            total += label.getMeasuredWidth() + (signalOn ? gap : 2 * gap);
+        }
+        if (total <= 0) {
+            releaseOutTypeSpace(container);
+            return;
+        }
+        reserveOutTypeSpace(container, total);
     }
 
     /**

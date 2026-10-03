@@ -1,4 +1,4 @@
-﻿# HyperDuo - install the signed APK on the connected device and watch the log.
+# HyperDuo - install the signed APK on the connected device and watch the log.
 #
 # Usage:
 #   & C:\code\HyperDuo\install.ps1              # install + enable in LSPosed + tail log
@@ -21,7 +21,7 @@ $ErrorActionPreference = 'Continue'
 $Root     = 'C:\code\HyperDuo'
 $Adb      = 'C:\Program Files\UotanToolbox\Bin\platform-tools\adb.exe'
 $Apk      = Join-Path $Root 'app\build\outputs\apk\debug\app-debug.apk'
-$Package  = 'com.hyperduo.trio'
+$Package  = 'io.github.yixing233.hyperduo'
 
 function Step($t) { Write-Host "==> $t" -ForegroundColor Cyan }
 
@@ -53,10 +53,10 @@ Step 'verifying the package is present'
 & $Adb shell pm list packages 2>&1 | Select-String -Pattern $Package
 
 Step 'confirming the modern-API entry point survived packaging'
-& $Adb shell "unzip -l /data/app/*/com.hyperduo.trio*/base.apk 2>/dev/null | grep -E 'xposed|classes.dex'" 2>&1
+& $Adb shell "unzip -l /data/app/*/io.github.yixing233.hyperduo*/base.apk 2>/dev/null | grep -E 'xposed|classes.dex'" 2>&1
 
 Step 'opening the settings screen'
-& $Adb shell am start -n com.hyperduo.trio/.ui.MainActivity 2>&1 | Out-Null
+& $Adb shell am start -n io.github.yixing233.hyperduo/.ui.MainActivity 2>&1 | Out-Null
 
 if ($InstallOnly) { exit 0 }
 

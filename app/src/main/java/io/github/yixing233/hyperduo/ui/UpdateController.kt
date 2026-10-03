@@ -1,4 +1,4 @@
-package com.hyperduo.trio.ui
+package io.github.yixing233.hyperduo.ui
 
 import android.content.Context
 import android.content.Intent
@@ -31,6 +31,14 @@ private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/late
 
 /** Opened when the user wants the notes in full, or when a download is refused. */
 internal const val RELEASES_PAGE = "https://github.com/$REPO/releases"
+
+/**
+ * The repository itself — README, source and issues.
+ *
+ * <p>Beside the other two so it cannot drift either, and distinct from
+ * [RELEASES_PAGE]: one shows what the module is, the other what changed.
+ */
+internal const val REPO_HOME = "https://github.com/$REPO"
 
 /**
  * How long the connect handshake and each read may hang.
@@ -251,8 +259,13 @@ internal class UpdateController(private val context: Context) {
         runCatching { context.startActivity(intent) }
     }
 
-    /** Opens the release page in a browser, notes and all. */
-    fun openReleasePage(url: String) {
+    /**
+     * Opens [url] in a browser.
+     *
+     * <p>Named for what it does rather than for the release page, because the
+     * card now sends the user to two different URLs through it.
+     */
+    fun openInBrowser(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }

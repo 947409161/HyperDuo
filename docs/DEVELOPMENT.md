@@ -6,13 +6,13 @@
 
 | 项 | 值 |
 | --- | --- |
-| `namespace` / `applicationId` | `com.hyperduo.trio` |
+| `namespace` / `applicationId` | `io.github.yixing233.hyperduo` |
 | `versionCode` / `versionName` | 源码里 2 / 1.1；发布时由 `release.ps1 -Version` 注入（见「发布流水线」） |
 | `minSdk` / `targetSdk` / `compileSdk` | 29 / 36 / 37 |
 | Java / Kotlin JVM target | 21（不是选择，见「构建」） |
 | 框架接口 | libxposed **API 102**（`minApiVersion=102`、`targetApiVersion=102`、`staticScope=true`） |
 | 作用域 | `com.android.systemui`（`app/src/main/resources/META-INF/xposed/scope.list`） |
-| 入口 | `com.hyperduo.trio.HyperDuoModule`（`java_init.list`） |
+| 入口 | `io.github.yixing233.hyperduo.HyperDuoModule`（`java_init.list`） |
 
 应用侧有两个入口：`.ui.MainActivity` 带 `de.robv.android.xposed.category.MODULE_SETTINGS`
 分类（LSPosed 管理器里点击模块进入），`.ui.MainActivityAlias` 是桌面 LAUNCHER 图标。
@@ -29,7 +29,7 @@
 ## 源码结构
 
 ```
-com.hyperduo.trio
+io.github.yixing233.hyperduo
 ├─ HyperDuoModule.java   入口（extends XposedModule，按 META-INF/xposed/java_init.list 实例化）
 ├─ HyperDuoApp.kt        Application：注册 XposedServiceHelper 监听，持有 service
 ├─ Prefs.java            键名 / 默认值 / 上下界（两端唯一真源）
@@ -38,6 +38,7 @@ com.hyperduo.trio
 ├─ TrioHooks.java        全部 hook 安装与容器折叠逻辑
 ├─ TrioState.java        电量 / 信号等级 / 前景色等运行期状态
 ├─ TrioGeometry.java     120×120 设计空间的几何常量
+├─ TrioAppearance.java   外观规则：每个元素该不该画、画在哪（渲染器与预览共用）
 ├─ TrioRenderer.java     纯 Canvas 描边绘制（状态栏与预览共用）
 ├─ TrioPreviewView.java  设置界面里的预览 View
 ├─ Refl.java             反射小工具
@@ -46,6 +47,7 @@ com.hyperduo.trio
    ├─ SettingsScreen.kt       全部设置项 + 预览卡片 + 颜色弹窗 + 更新卡片
    ├─ SettingsRepository.kt   读写本地 prefs 并写穿到 remote preferences
    └─ UpdateController.kt     检查 / 下载 / 调起安装器（GitHub Releases）
+                              三个 URL 常量同处一处：API、RELEASES_PAGE、REPO_HOME
 ```
 
 ## 构建
@@ -109,7 +111,7 @@ property，缺省时回落到 `1.1` / `2`。**发布构建不能加 `--offline`*
 `Execution failed for task ':app:produceReleaseComposeMapping'` 失败。
 
 release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro` 里
-`-keep class com.hyperduo.trio.** { *; }` 保证了 hook 侧与更新器都不被剥离 —— 这是必须的，
+`-keep class io.github.yixing233.hyperduo.** { *; }` 保证了 hook 侧与更新器都不被剥离 —— 这是必须的，
 因为 hook 类由框架按 `java_init.list` 反射实例化，R8 看不到这条引用。
 
 ### 签名
@@ -184,16 +186,16 @@ code 判成败 —— 调外部程序一律走它。
 ```
 
 脚本内硬编码了 `$Root='C:\code\HyperDuo'`、`$Adb='C:\Program Files\UotanToolbox\Bin\platform-tools\adb.exe'`、
-`$Package='com.hyperduo.trio'`；日志用 `adb logcat -v time -s LSPosedFramework:* AndroidRuntime:E *:S`。
+`$Package='io.github.yixing233.hyperduo'`；日志用 `adb logcat -v time -s LSPosedFramework:* AndroidRuntime:E *:S`。
 
 手动启动设置界面：
 
 ```powershell
-adb shell am start -n com.hyperduo.trio/.ui.MainActivity
+adb shell am start -n io.github.yixing233.hyperduo/.ui.MainActivity
 ```
 
 日志 tag 是 **`LSPosedFramework`**（框架代打的），**不是** `HyperDuo`；行形如
-`(com.android.systemui)[com.hyperduo.trio,HyperDuo,<id>,0,1] <msg>`。启动时会打印一行
+`(com.android.systemui)[io.github.yixing233.hyperduo,HyperDuo,<id>,0,1] <msg>`。启动时会打印一行
 `HyperDuo installed, hooks=9`；固件改了方法名时会打 `skip <id>: method not found`。
 
 需要重新定位某个容器时，把 `TrioHooks.DEBUG_DUMP` 改成 `true` 再构建，即可打印容器的屏幕
@@ -251,7 +253,7 @@ README 里给的手工命令一致——用 `su -c` 而不是往裸 `su` 里喂�
 深/浅背景）且没有撤销，误触的代价与重启同一个量级。
 
 弹窗打开期间只翻转一个 `resettingColors` 布尔值，**不在打开时就重置**：确认与取消走的是同一条 `update`
-漏斗，写操作只发生在确认回调里。该行此前没有 `enabled` 守卫，顺带补上 `gated && settings.roleColors`——
+漏斗，写操作只发生在确认回调里。该行此前没有 `enabled` 守卫，顺带补上 `a.glyph && a.roleColors`——
 在状态颜色总开关关闭时它重置的是一组不生效的值，和上面几行保持一致的灰显更合理。
 
 ### 顶栏模糊
@@ -292,6 +294,14 @@ graphics layer，顶栏再通过同一个 `backdrop` 采样它——捕获源与
   `enabled = hint != null` 关闭——`Tooltip.kt` 里 `tooltipGestures` 在 `enabled = false` 时退化成
   普通 Modifier，所以灰显行只有在确实存在未打开的前置开关时才响应长按。
 - **仅被总开关拦下的行刻意不加提示**：总开关就在同一屏上，提示是噪音。
+- **一行可以被别的开关门禁，但永远不能被自己门禁。** 推导 `enabled` 时不要用把本行开关值折进去的
+  派生谓词，而要回溯到它所依赖的**上游**开关。1.4.1 落地时「充电时显示闪电」写成了
+  `enabled = a.glyph && a.drawsBolt()`，而 `TrioAppearance.drawsBolt()` 是 `boltWanted && value`
+  ——**含这一行自己的值**，于是关掉它以后该行永久变灰、再也打不开（用户上机报「无法开启」）。
+  正确写法是 `enabled = a.glyph && a.value`（挂「显示电量数字」）。上机核验方法：`uiautomator dump`
+  取该开关节点，点掉之后它必须是 `checked="false"` 但仍 `clickable="true" enabled="true"`；旧写法
+  会是 `clickable="false" enabled="false"`。**不要**用「预置 `show_bolt=false` 再启动 app」验证——
+  `SettingsRepository` 启动时会全量同步并把 pref 回写成 `true`，必须走 UI 点击。
 
 ### 导航：miuix-nav
 
@@ -381,6 +391,12 @@ graphics layer，顶栏再通过同一个 `backdrop` 采样它——捕获源与
 半径 5.5，等级 0–4。环线粗细 / 弧线粗细 / 数字字号 / 轨道透明度由 `TrioSettings` 覆盖，未改动
 时可复现上面这些原始值。
 
+`DOTS` 只有一排；双卡读数的第二排（`DOTS_DUAL`）由它关于**环心** `B_CY = 61.48715261785473f`
+镜像得到，而不是关于设计盒中心（120 的一半 = 60）——镜像轴取错会让上排整体偏 1.49 设计单位，
+在 28dp 的宿主里约合 0.76px，肉眼几乎看不出，但对齐参考图时对不上。双排点半径
+`DUAL_DOT_R = 7.0f` 比单排的 `DOT_R = 5.5f` 大：参考图的点明显更大，且 7.0 是最大环线粗细
+（16）下仍留在墨迹盒内的上限。
+
 缺口是**有内容才开**的：`gapStart == gapEnd == 0`（`GAP_NONE`）时 `batteryRing` 的两段会合并成
 一整圈。判断顶部缺口是否被占用，以及谁占圆心，都在 `TrioRenderer.drawInto` 的决策块里
 （`TrioRenderer.java:118` 起）；圆心与缺口的字号、基线、清空宽度分别由
@@ -434,15 +450,70 @@ Wi-Fi 搬进缺口仍是 canvas 变换（`translate` + `scale`）完成的，几
 代码侧的符号（`Prefs.KEY_VALUE_CENTRED`、`TrioSettings.valueCentred`、`TrioRenderer` 里的 `centred`）
 都跟着标签改成了「居中」语义，只有那个字符串字面量保持 `"swap_wifi_value"`。
 
+### 三合一样式：圆环与矩形
+
+`trio_style` 两档：`0` 圆环（默认）、`1` 矩形。**选项顺序即存储值**，未识别的值在
+`TrioSettings` 里被 `Prefs.clamp` 收敛回圆环，所以升级不会画出一个不存在的排布。
+
+切换发生在 `TrioRenderer.drawInto` 的入口：`drawInto` 只负责 `clearWhenDone` 清屏、算一次
+`roleColor`，再按样式选**各自的墨迹盒**做一次 `translate` + `scale`，随后的绘制分成两支：
+
+| | 圆环（`STYLE_RING`） | 矩形（`STYLE_RECT`） |
+| --- | --- | --- |
+| 墨迹盒 | `INK_X/Y/W/H`（`1.0, 0.5, 117.0, 117.5`） | `RECT_INK_X/Y/W/H`（`1.0, 1.0, 118.0, 114.4`） |
+| 落点 | `drawRingLayout` | `drawRectLayout` |
+
+两套墨迹盒是必要的：矩形排布的纵向范围比圆环小、横向范围比圆环大，共用一盒会让其中一种在
+宿主 28dp×20dp 的画布里被裁掉或缩得偏小。选盒由包级重载
+`inkScale(int w, int h, boolean rect)` 决定，它再转调私有的
+`inkScale(int w, int h, float inkW, float inkH)`；`drawInto` 与设置页预览都走这个重载，
+**预览因此拿到与状态栏逐位相同的缩放**。公开的 `inkScale(int, int)` 语义不变
+——`TrioHooks` 用它做「宿主尚未测量」的守卫（`TrioHooks.java:1752`），改它会把守卫一起改坏。
+环外标签的字号**已经不再取自 inkScale**，见「网络类型：环内与环外」。
+
+矩形排布（设计空间仍是 120×120，`TrioGeometry` 的 `rectangular arrangement` 一节）：
+
+- **两列信号点**，`RECT_DOT_LX = 9.6` / `RECT_DOT_RX = 110.4`，行心
+  `RECT_DOT_TOP + i * RECT_DOT_STEP`（`15.6 + i * 22.5`，4 行），半径 `RECT_DOT_R = 8.6`。
+  两列是**同一个电平的镜像**：点亮数 `min(RECT_DOT_ROWS, level)`，自顶向下点亮，未点亮用
+  `withAlpha(fg, cfg.trackAlpha)`。随 `show_mobile` 开关。
+- **顶部槽位**三选一，优先级 **闪电 > Wi-Fi > 网络类型**，与圆环排布一致：闪电复用
+  `drawBolt` 的路径，只换成 `rectBoltOffsetX/Y`（把缩放后的墨迹中心摆到 `x = 60`）；
+  Wi-Fi 复用**同一组** `W1/W2/WIFI_DOT`，用 `RECT_WIFI_SCALE = 0.95` 缩放后由
+  `rectWifiOffsetX/Y` 锚定到外弧中心线顶点 `RECT_WIFI_TOP = 8.5`；网络类型用
+  `RECT_TYPE_BASELINE = 42.3` 与 `typeSize * RECT_TYPE_SCALE(= 1.26)`。
+  弧的缩放是量出来的：参考图外弧的墨迹宽 3.05 倍点径，未缩放的组是 3.20 倍，说明这个
+  排布下弧几乎就是全尺寸，取 `0.95` 而不是 `1.0` 是因为参考图自己的弧略扁（墨迹更宽、
+  描边更细）——**这个差异刻意不复刻，弧必须沿用现有图标，只做重定位**。
+- **电量数字**居中于 `RECT_VALUE_X = 60`，基线 `RECT_VALUE_BASELINE = 92.7`，字号
+  `valueSize * RECT_VALUE_SCALE(= 1.38)`，颜色是 `fg`（与圆环排布的 `drawValue` 一致，
+  `role` 只喂给电量条）。两种文字都先过 `fitSize(text, requested, RECT_TEXT_CLEAR)`
+  （`RECT_TEXT_CLEAR = 83.6`，即两列点之间的净宽）。
+- **底部电量条**：`RECT_BAR_LEFT = 1.0` / `RECT_BAR_RIGHT = 119.0`（与两列点的外缘齐平）、
+  中心线 `RECT_BAR_CY = 107.3`，**粗细取 `cfg.ringStroke`**——矩形没有圆环，让这个滑块继续有
+  归宿；设置页在矩形下把这一行改称「电量条粗细」（`stroke_title_rect`），滑块本身不换。
+  轨道是整条胶囊（`drawRoundRect`，`withAlpha(fg, cfg.trackAlpha)`），点亮段用
+  `Path.addRoundRect` 配 `RECT_RADII = {r,r, 0,0, 0,0, r,r}`（左端圆角、右端垂直切边），
+  右端 `cut = left + (right - left) * clamp01(level / 100f)`。
+- **`valueCentred` 对矩形完全无效**：`drawRectLayout` 里没有它的分支。规则收在
+  `TrioAppearance`（构造时 `centreValue = c.valueCentred && !rect`），设置页据此把这一行置灰
+  并提示需要先打开圆环；这是本次门禁改造**唯一有意的行为变化**。
+
+矩形排布把 Wi-Fi 弧的画弧主体从 `drawWifi(c, level, fg, a, gap)` 抽成了
+`drawWifiArcs(c, level, fg, a)`（`TrioRenderer.java:479` / `:496`）：两个排布各自只做一次
+`translate` + `scale` 再调用它，**弧的形状与描边完全同源**，这也是「Wi-Fi 图标沿用现有实现」
+的落地方式。取 `TrioAppearance` 而不是 `TrioSettings` 是同一件事的一部分：弧的粗细现在问
+`a.arcStroke`，不再是 `cfg.arcStroke`。
+
 ### 网络类型：环内与环外
 
 `mobile_type_mode` 三档：`0` 关闭、`1` 环内、`2` 环外。**选项顺序即存储值**。
 
-- **环内**（`1`）走渲染器：`TrioRenderer.drawInto` 的决策块先判 `typeInRing =
-  cfg.mobileTypeMode == Prefs.MOBILE_TYPE_IN_RING && mobileType != null && !mobileType.isEmpty()`，
-  再按圆心是否已被电量数字占用分流：`typeInCentre = typeInRing && !wifi && !valueInCentre`，
-  `typeInGap = typeInRing && valueInCentre && !wifi && !bolt`。即**数字优先**，类型退到顶部缺口；
-  没有数字可展示时才回到圆心。它**不查 `show_value`** —— 与闪电（`showBolt && showValue`）不同。
+- **环内**（`1`）走渲染器：规则在 `TrioAppearance.Ring` 的决策块里
+  （`TrioAppearance.java:222-250`）。`type = a.typeInRing && mobileType != null && !mobileType.isEmpty()`，
+  再按圆心是否已被电量数字占用分流：`typeInCentre = type && !wifi && !valueInCentre`，
+  `typeInGap = type && valueInCentre && !wifi && !bolt && !dual`。即**数字优先**，类型退到顶部缺口；
+  没有数字可展示时才回到圆心。它**不查 `show_value`** —— 与闪电（`drawsBolt()` = `showBolt && showValue`）不同。
 - **环外**（`2`）不是 canvas 绘制。宿主画布只有 `battery_meter_width = 28dp` ×
   `status_bar_icon_height = 20dp`，装不下环外的字，所以模块**自己往电池容器里新增一个
   `TextView`**：`TrioHooks.OutTypeLabel`（`TrioHooks.java` 的 `out-of-ring type label` 区块）。
@@ -462,15 +533,18 @@ Wi-Fi 搬进缺口仍是 canvas 变换（`translate` + `scale`）完成的，几
 文本/字号需要变时**只排队一次 posted sync**（`setText`/`setTextSize` 会 re-measure → 调度布局，
 同样不能在 `onLayout` 内做），否则只更新颜色与位置。
 
-字号用 `setTextSize(TypedValue.COMPLEX_UNIT_PX, cfg.typeSize * TrioRenderer.inkScale(w, h))`：
-**必须显式 `COMPLEX_UNIT_PX`**，单参 `setTextSize(float)` 默认按 SP 解释。`inkScale` 是
-`TrioRenderer` 里为环外标签抽出的包级 helper（`TrioRenderer.java:425`），与画布同一套 120×120
-设计空间缩放，所以环外的字和环内的字视觉大小一致。宿主尚未测量（`inkScale <= 0`）时跳过挂载，
-下一次 posted sync 自愈。文本为空时置 `GONE` 而非移除 —— 网络类型随 modem 来去，每次布局
-add/remove 太吵。
+字号用 `setTextSize(TypedValue.COMPLEX_UNIT_PX, a.outTypeSize)`：**必须显式
+`COMPLEX_UNIT_PX`**，单参 `setTextSize(float)` 默认按 SP 解释，而这里存的是裸 px。**环外字号
+不再乘 `inkScale`**：它是一个独立键 `out_type_size`（默认 32，与 `type_size` 同值，
+见 `Prefs.KEY_OUT_TYPE_SIZE`），含义是「宿主 20dp 图标盒子里的像素」，乘上画布缩放反而会
+把两种排布的字号绑在一起。字重取 `a.typeWeight`（`TrioRenderer.typefaceFor`），与环内共用。
+宿主尚未测量（`inkScale <= 0`）时跳过挂载，下一次 posted sync 自愈。文本为空时置 `GONE`
+而非移除 —— 网络类型随 modem 来去，每次布局 add/remove 太吵。
 
-`typeSize` / `typeWeight` 两个尺寸项**两种模式共用**（设置页在 `mobileTypeMode == 0` 时置灰）。
-`show_mobile_type` 是废弃的旧布尔键，仅用于迁移读取（见配置项参考）。
+`type_size` 只作用环内，`out_type_size` 只作用环外，二者**不再共用**；`type_weight` 是两者
+共用的。设置页的门禁因此是 `a.typeInRing` / `a.typeOutOfRing` / `a.typeAnywhere()`，不再是
+裸的 `mobileTypeMode == X` 比较。`show_mobile_type` 是废弃的旧布尔键，仅用于迁移读取
+（见配置项参考）。
 
 已知风险：原生 `mobile_type_single` 是 mobile 槽组的子级，而 `foldedSlots()` 不包含
 `mobile_type`，所以「关闭显示移动信号点 + 环外」时可能同时看到原生与自建两个标签。环内模式不会
@@ -497,9 +571,22 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 
 ### 预览与状态栏共用几何
 
-`TrioPreviewView`（设置界面里 58dp 的方块）直接调用
+`TrioPreviewView`（设置界面里 46dp 的方块）直接调用
 `TrioRenderer.drawInto(..., clearWhenDone=false)`，与状态栏走同一份代码与同一个 `TrioSettings`
 快照。`clearWhenDone=false` 是必须的 —— UI 预览若清画布会把 Activity 背景擦成透明黑。
+
+预览卡共 7 格：充电 / 快充 / 正常 / 无 Wi-Fi（带双卡电平与环内类型）/ 省电 / 危险 / **环外类型**。
+第 7 格是唯一的例外：环外标签不由渲染器绘制（见「网络类型：环内与环外」），所以那一格走
+`TrioPreviewView.setOutTypeOnly(true)` 自己画。它必须与 `TrioHooks.updateOutTypeLabel` 同口径
+——字号取 `outTypeSize`、字重取 `typeWeight`、按 px 而非 sp，再把宿主 20dp 图标盒按预览自身
+的高度等比换算（`HOST_ICON_HEIGHT_DP = 20f`，与 `docs` 里 `status_bar_icon_height` 一致）。
+`out_type_size` 在设置页别处**没有任何可见反馈**，这一格就是它的唯一所见即所得参照；口径一旦
+和钩子侧不一致，预览就开始骗人，比没有预览更糟。
+
+唯一的额外处理：状态栏里这个标签是 wrap-content、排在图标盒旁边，宽了就往右伸不会被裁；
+而预览格是个正方形，`"5GA"` 这种宽字串会顶到边界。所以 `TrioPreviewView.drawOutTypeLabel`
+在量得文本宽度超出格宽时，只用 `setTextScaleX` 做**水平压缩**，不动字号 —— `outTypeSize`
+真正设定的是**高度**，这一维必须保持精确。
 
 ### 原生图标抑制
 
@@ -585,6 +672,150 @@ style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会
 采样只认权威状态栏容器（`isStatusBarContainer`：等于捕获到的 `mStatusBarStatusIcons`，或祖先
 类名为 `MiuiPhoneStatusBarView`），否则控制中心/QS 头部的容器会污染全局状态。
 
+### 双卡信号
+
+「双卡信号」（`dual_sim_signal`）在**无 Wi-Fi 且未充电**时把一排点换成上下两排：**上排 = 卡一
+（slot 0）、下排 = 卡二（slot 1）**。判定集中在 `TrioAppearance.dualSimRows(wifiInk, charging,
+sims)`，渲染端只问「画几排」。触发条件三条同时成立，任一条不满足就回退成单排（当前上网卡）：
+
+1. 开关打开；
+2. `wifiInk` 为假（没有 Wi-Fi 墨迹）；
+3. 第 3 个参数（`charging`）为假 —— 注意是**插没插充电器**，不是**这一帧画不画闪电**。
+   闪电自己还有 `show_value` 这个前置条件（`drawsBolt() = showBolt && showValue`），两者不是一回事；
+   早期实现误把 `bolt` 传进来，于是「充电中 + 关掉电量数字」会被判成未充电而画出两排。现在两处
+   调用点（`Ring`/`Rect`）都传 `charging`，`work\dualsimcheck\verify.ps1` 专门盯这条。
+
+`sims < 2` 时也回退 —— 只有一张卡有读数时，画两排会多出一排空格，不如照旧画当前上网卡。
+
+几何在 `TrioGeometry`：`DOTS_DUAL[8][2]` 的 `0..3` 是 SIM 1 上排（`DOTS` 关于**环心** `B_CY`
+镜像，不是关于设计盒中心），`4..7` 是 SIM 2 下排（`DOTS` 原值）；下排落在 `B_START`/`B_SWEEP`
+没盖住的那段自然开口里，所以双排时 `gapUsed` 强制为真，否则电量弧会横穿上排点。点半径用
+`DUAL_DOT_R = 7.0f`（单排仍用 `DOT_R = 5.5f`）—— 参考图的点明显更大，且 `7.0` 是在最大环线
+粗细下仍能留在墨迹盒内的上限。
+
+**12 点钟缺口在双排时要张到与底部开口等宽**（`GAP_START_DUAL = 1f - 180f / B_SWEEP ≈ 0.2581`、
+`GAP_END_DUAL = 180f / B_SWEEP ≈ 0.7419`，`TrioRenderer.drawRingLayout` 里 `r.dual` 优先取这对值）。
+上排是 `DOTS` 绕环心镜像，外点几乎正落在弧中线 `B_R = 51.5` 上：外点圆心到弧端点圆心只有约
+10.4 个设计单位，而弧是圆帽收尾（`STROKE.setStrokeCap(ROUND)`）、帽半径 `ringStroke/2 = 7`，再加
+点半径 7 共 14 ⇒ **帽与点重叠，上排看着糊成一团、且左右不对称**。原先共用的
+`GAP_START_IDLE`/`GAP_END_IDLE` 只张 `0.35 * B_SWEEP = 84.9°`，而弧底部自然开口是
+`360 - B_SWEEP = 117.4°`，窄了 32.5°。改成等宽后上下互为镜像，余量回到约 10 单位，与下排一致。
+放大缺口不影响缺口里的文字：双排时百分比已改去环心（见下），`gapClearWidth()` 仍按 idle 缺口算。
+顺带一处叠加缺陷：`valueInCentre` 原先只看 `centreValue`/`(!wifi && !type)`，双排的上排占了缺口而
+`valueInGap` 会把数字送进同一位置，两排点与数字叠画；现在 `valueInCentre = hasValue &&
+(a.centreValue || dual || (!wifi && !type))`，数字让位到它本来该去的环心。
+
+**电平来源**：`MiuiStatusBarIconViewHelper.transformResId(int, boolean, boolean)` 是静态方法，
+**签名里没有 subId 也没有 slot**，而且实测渲染走的是 Compose 的 `stacked_mobile` 堆叠图标
+（经典 `slot=mobile` 的 `ModernStatusBarMobileView` 是 alpha 0 的死实例），所以那一层拿不到分卡
+读数。模块直接问 `android.telephony`：`SubscriptionManager.getActiveSubscriptionInfoList()` 拿
+每个 `getSubscriptionId()` / `getSimSlotIndex()`（subId↔slot 的对应关系运行时解析，**不硬编码**），
+`getDefaultDataSubscriptionId()` 认当前上网卡，`TelephonyManager.createForSubscriptionId(subId)
+.getSignalStrength()` 再取电平得到 0..4。
+
+**取哪个电平：MIUI 的，不是 AOSP 的**（`TrioState.miuiLevel(SignalStrength)`）。MIUI 用
+`SignalStrength.getMiuiLevel()` 选 `stat_sys_signal_N`，该方法**不在公开 SDK 里**（连 SDK 37 的
+`android.jar` 也只有 `getLevel()`），所以用 `Refl.callByName(strength, "getMiuiLevel")` 反射取，
+取不到（`NoSuchMethodError`/非 Number）才退回 `strength.getLevel()`。实机证据：Xiaomi 14 在 5G NR 下
+`dumpsys telephony.registry` 两张卡都是 **`miuiLevel = 4` 而 `level = 3`**，而系统状态栏画的是
+四格满格。`MobileSignalController.updateTelephony()`（jadx
+`work\jadx-out\sources\com\android\systemui\statusbar\connectivity\MobileSignalController.java:495`）
+走的正是 `miuiLevel = signalStrength2.getMiuiLevel();` ⇒ 如果双排照 `getLevel()` 取，就会**比系统
+单排读数矮一格**，这正是用户报的「单卡满格、双卡上下都少一格」。`work\simcheck\verify.ps1` 现在
+多建一份「把 `miuiLevel(strength)` 换回 `strength.getLevel()`」的负例，钉住这条。
+
+`Context` 由绘制路径首次经过时经
+`TrioState.attachContext(...)` 缓存（hook 安装时可能根本没有 context）。整个采样在
+try/catch Throwable 里，失败时**保留上一轮的值**而不是清空。subId→slot 与各卡电平在
+`sampleSims` 末尾一次性发布到 `sSlotLevels`/`sDataSlot`，避免跨轮询拼帧。
+
+采样时机有两处：`refresh()` 里按 `SIMS_INTERVAL_MS = 2000L` 的帧率守卫（`sampleSimsIfDue`，仅在
+`dualSim` 打开或单排链从没答过时轮询），以及 `hyperduo-signal` 拦截里的 `pollSimsNow()` —— MIUI
+只在读数变化时才重绑图标，所以那次调用本身就是「per-SIM 电平已过期」的事件；它绕过帧率守卫，
+但只在**确实变化**时返回 true，避免 MIUI 自己的图标抖动变成重绘循环。
+
+**「单排 = 当前上网卡」**：`refresh()` 读电平之后，若 `sMobileLevel < 0`（图标链从没答过）而
+`sSlotLevels[sDataSlot]` 有读数，则用后者兜底。这样开关关掉、单卡、或充电中时那一排仍然是
+当前上网卡，而不是最后一张碰巧刷新过的卡。subId↔slot 的映射与这条兜底由
+`work\simcheck\verify.ps1` 离线守着（见「测试」一节）——参考机上 `subId` 恰好等于槽位，
+所以「把订阅号当槽位」这种写法在那里看起来是对的，那条工装用不相等的 id 把它逼出来。
+
+### 信号：环内与环外堆叠
+
+`signal_mode` 两档：`0` 环内（默认）、`1` 环外。**选项顺序即存储值**，未识别的值由
+`TrioSettings` 的 `Prefs.clamp` 收敛回环内。环外模式配套两个布尔键 `stacked_signal`（默认关）
+与 `data_sim_only`（默认关）。
+
+行为的唯一判据收在 `TrioAppearance` 的两个方法上，别处一律不问裸键：
+
+- `signalDots()` = `mobile && signalInRing` —— **环内是否画那排点**。它同时是 `foldedSlots()`
+  折叠 `mobile` 的条件、`drawRingLayout` 画点阵的条件、以及 `TrioAppearance.Rect.dots` 的来源。
+  原先这三处各写一次 `a.mobile`，环外一旦出现就会三处不一致（环里不画、槽却折叠了）。
+- `stackedOut()` = `glyph && mobile && signalOutOfRing && stackedSignal` —— **模块是否接管环外读数**，
+  也是唯一允许折叠 `mobile` 槽的环外条件。带 `mobile` 是因为「显示移动信号点」的语义是
+  「哪儿都不画移动读数」，环内它已经通过 `signalDots()` 这样回答；漏掉它就会出现
+  「点阵开关关着、环外堆叠却照画」——用户关掉的那一项被另一个开关复活。
+- `foldsMobile()` = `signalDots() || stackedOut()` —— **Hook 侧唯一该问的问题**。它写在这里而不是
+  `TrioHooks.foldedSlots()` 里，是为了让规则不依赖 Xposed API 就能被工装驱动（见「测试」）。
+
+由此得到四条组合，**只有第一条与改动前逐字节相同**：
+
+| `signal_mode` | `stacked_signal` | `mobile` 槽 | 移动信号由谁画 |
+| --- | --- | --- | --- |
+| 环内 | 任意（不起作用） | 折叠 | 模块（环内点阵，含双卡两排） |
+| 环外 | 关 | **不折叠** | **系统原生信号格** |
+| 环外 | 开 | 折叠 | 模块（`OutSignalView`） |
+| 环外 | 开 + `data_sim_only` | 折叠 | 模块，且只画上网卡 |
+
+环外 + 堆叠关**必须不折叠**：这条路径下模块什么都不画，折叠了就是屏幕上少一个信号格。
+`work\outringcheck\verify.ps1` 用真值表把 `foldedSlots()` 在这四种组合下的输出逐一对照。
+另外「显示移动信号点」（`show_mobile`）关掉时，上表落空：`mobile` 为假使 `signalDots()` 与
+`stackedOut()` 同时为假，于是两个位置都既不折叠也不自绘，移动读数整项交还系统——这才是那个
+开关承诺的「不画移动读数」，而不是只对环内生效。
+
+**绘制**：`TrioRenderer.drawOutSignal(Canvas, int width, int height, int bars, int dots, int fg,
+TrioAppearance a)`。它**不使用 120×120 设计空间，也不乘 `inkScale`**：环外读数不在环里，
+用一个描述电池的数字去标定它，等于把状态栏高度绑到电池几何上。所以它直接用参考图自己的单位
+（`TrioGeometry` 的 `stacked out-of-ring signal` 一节）：四列、列距 67、柱宽 50、柱高
+`{75, 100, 125, 150}` 等差递增、柱底共线、圆头半径 = 柱宽/2；点行直径 50，与柱底留 9；
+`STACK_INK_W = 251`、`STACK_INK_H = 209`。整套单位两轴同尺度，所以只算一个 `scale` 就能保住
+柱阶、列距与圆头的比例关系。未点亮的柱/点用 `withAlpha(fg, a.trackAlpha)` —— 与环内点阵同一个
+底纹浓度键。**读数不足 4 时不画残缺的行**：几列亮就是几格，剩下的列留在底纹色里。
+
+**注意那个 9 是怎么来的**：参考图没有抗锯齿，边缘落在整像素上，所以柱底边缘是 238、点行上缘是
+247，空带是 `238..246` = 9。若按「两段墨迹首行下标相减」去量同一张图会得到 10，整套读数就高了
+一个单位。`work/outringcheck/compare.py` 存在的意义正是这一条差值 —— 它把参考图与渲染结果**都**
+量一遍再比，而不是拿源码里的数字去核对源码。
+
+**两行 vs 一行**：`outSignalLevels(boolean dataSimOnly, int mobileLevel, int[] slotLevels,
+int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `out = {卡1, 卡2}`（柱 + 点）；
+只有一张卡有读数 ⇒ `{那, -1}`（只有柱，无点行）；都没有时退回 `mobileLevel` 兜底。**只画一张卡
+时统一画柱、不画点**，哪怕那张卡恰好是卡二 —— 一张卡不该因为它是第二张就用另一种符号。
+`data_sim_only` 打开时只取上网卡：`dataSlot` 命中哪张就取哪张，`dataSlot` 未知（`-1`）或那张卡
+没有读数时退回第一张有读数的卡，绝不退化成两张。
+
+**高度**：视图高度取锚点（电池图标盒）的高度，宽度由 `outSignalWidth(height, dots)` 按参考图
+纵横比算出 —— 有/无点行分别是 `STACK_INK_H` 与 `STACK_BAR_H[3]`，所以没有点行时不会在下方
+留一条空白。宿主尚未测量（`inkScale <= 0`）时跳过挂载，下一次 posted sync 自愈。
+
+**挂载位置与生命周期**完全照抄环外类型标签那套（见「网络类型：环内与环外」）：挂在
+`batteryContainerOf(host)` 返回的 `MiuiStatusBatteryContainer` 上，同样的 posted-only
+挂载/摘除、同样的 `instanceof OutSignalView` 当标记（不用 `WeakHashMap`）、`onDetachedFromWindow`
+时一并摘掉。`requestOutSignalSync` 的第一行是 `if (!stackedOut()) return;` —— 与
+`requestOutTypeSync` 反过来写（后者现在写的是 `if (typeOutOfRing) return;`，是个既有 bug）。
+
+**两个视图共用一条 strip**：信号与类型标签都排在电池图标左边，都以
+`reserveOutTypeSpace(container, total)` 往容器左侧撑 padding。它们各自更新时如果都按自己的宽度
+去撑，后更新的那个就会把先更新的挤掉，所以统一走 `reserveOutRingStrip(container)` —— 它读两个
+子视图的 `getMeasuredWidth()` 求和（信号在前、标签在外，间距各一份 gap），一次撑到位。
+定位用 `placeOutTypeLabel(container, view, anchor)`，标签的锚点是 `labelAnchorIn(container,
+meter)`：有信号就贴在信号外侧，否则直接贴电池盒 —— 阅读顺序是 网络类型 → 信号 → 电池，
+标签永远在最外。
+
+**采样时机**：环外堆叠也要分卡读数，所以 `TrioState.refresh()` 的轮询门与
+`hyperduo-signal` 里的 `pollSimsNow` 条件都从裸的 `dualSim` 放宽成
+`dualSim || appearance().stackedOut()`。
+
 ## Hook 清单
 
 | id | 目标 | 作用 |
@@ -609,15 +840,20 @@ style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会
 
 ## 配置项参考
 
-键名、默认值与上下界的唯一真源是 `Prefs.java`（`app/src/main/java/com/hyperduo/trio/Prefs.java`）。
+键名、默认值与上下界的唯一真源是 `Prefs.java`（`app/src/main/java/io/github/yixing233/hyperduo/Prefs.java`）。
 
 | 键 | 默认 | 范围 |
 | --- | --- | --- |
 | `enabled` | `true` | — |
 | `show_wifi` / `show_mobile` / `show_value` / `show_bolt` | `true` | — |
+| `dual_sim_signal` | `false` | —（无 Wi-Fi 且未充电时改画上下两排点，上排卡一、下排卡二；见「双卡信号」） |
+| `signal_mode` | `0`（环内） | 0 – 1（环内 / 环外）；**选项顺序即存储值**；见「信号：环内与环外堆叠」 |
+| `stacked_signal` | `false` | —（环外时自绘柱+点；关闭则把 mobile 槽交还系统） |
+| `data_sim_only` | `false` | —（环外堆叠时只画上网卡；只在 `stacked_signal` 打开时有意义） |
 | `mobile_type_mode` | `0`（关闭） | 0 – 2（关闭 / 环内 / 环外） |
 | `show_mobile_type` | `false` | 已废弃，只读用于迁移 |
-| `swap_wifi_value` | `false` | 「电量数字居中」的存储键；名字是历史遗留，**冻结不改** |
+| `swap_wifi_value` | `false` | 「电量数字居中」的存储键；名字是历史遗留，**冻结不改**（只对圆环样式有效） |
+| `trio_style` | `0`（圆环） | 0 – 1（圆环 / 矩形）；**选项顺序即存储值** |
 | `role_colors` | `true` | — |
 | `color_critical_on_dark` / `color_critical_on_light` | `0xFFFF3B30` | — |
 | `color_charging_on_dark` / `color_charging_on_light` | `0xFF34C759` / `0xFF1F8F3D` | — |
@@ -649,15 +885,22 @@ style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会
   弧/点（不会崩溃）。Wi-Fi 的**有无**另有实时采样兜底，不受此限制。
 - 移动信号开关无法实时反映：`isIconVisible()` 在淡出的移动视图上仍为 true，故移动点只在
   resId 变化时更新。
+- 「双卡信号」的分卡电平来自 `android.telephony`（`SubscriptionManager` / `TelephonyManager`），
+  而**图标那条链给不出 slot**：`transformResId(int, boolean, boolean)` 是静态方法，签名里既没有
+  subId 也没有 slot；Compose 的 `stacked_mobile` 堆叠图标与 Dagger 里的
+  `MiuiMobileIconInteractorImpl`（它有 `subId` 与 `phoneId`）模块都够不着。因此该开关依赖
+  SystemUI 进程本身持有 `READ_PHONE_STATE` / `READ_PRIVILEGED_PHONE_STATE`（实测该进程
+  `sharedUserId="android.uid.systemui"`，模块不额外声明权限）。取数失败时只在日志里留痕，
+  字形退回单排，不会崩溃。
 - 修改环线粗细 / 数字字号等几何参数会立即生效，但**不会重新测量**原生电池视图的
   28dp×20dp 尺寸；极端值下字形可能被裁切。
 
 ## 目录
 
 ```
-app\build.gradle.kts                   Gradle 模块配置（namespace com.hyperduo.trio）
-app\src\main\java\com\hyperduo\trio\   hook 源码（Java）
-app\src\main\java\com\hyperduo\trio\ui\ 设置界面（Kotlin + Compose + Miuix）
+app\build.gradle.kts                   Gradle 模块配置（namespace io.github.yixing233.hyperduo）
+app\src\main\java\io\github\yixing233\hyperduo\   hook 源码（Java）
+app\src\main\java\io\github\yixing233\hyperduo\ui\ 设置界面（Kotlin + Compose + Miuix）
 app\src\main\res\                      strings / themes / 图标
 app\src\main\res\xml\file_paths.xml    FileProvider 路径（更新器下载目录）
 app\src\main\resources\META-INF\xposed\  java_init.list / scope.list / module.prop
@@ -670,6 +913,7 @@ work\jadx-out\                         MiuiSystemUI 反编译源（分析用，�
 work\unpacked\                         MiuiSystemUI 解包资源（分析用，不入库）
 work\geocheck\                         离线段渲染与解析校验（不入库）
 work\gapcheck\                         电量环缺口像素校验与前后对照图（不入库）
+work\outringcheck\                     环内/环外与两个信号开关的真值表校验、环外读数与参考图的数值比对（不入库）
 work\preview\                          离线 JVM 预览工装（不入库）
 work\overview\                         全部支持样式的状态总览图（不入库）
 .tools\                                JDK / Gradle / SDK / 本地 Maven 仓库
@@ -683,10 +927,13 @@ work\overview\                         全部支持样式的状态总览图（�
 
 1. **离线 JVM 预览**（`work\preview\`，不入库）：一套只服务工装的 `android.*` 桌面垫片 + 入口
    `PreviewMain`，直接编译 `Prefs.java` / `TrioSettings.java` / `TrioGeometry.java` /
-   `TrioRenderer.java` 出图，不需要设备就能看几何。工装内嵌的 `SharedPreferences` 替身**必须叫
-   `FakePrefs`** —— 叫 `Prefs` 会遮蔽真正的 `com.hyperduo.trio.Prefs`，导致常量解析失败。
-   垫片出图与真机不符时，**先怀疑垫片**（历史上 `Canvas.restoreToCount` 的语义错实现过一次，
-   症状是画布变换泄漏到后续所有绘制）。
+   `TrioAppearance.java` / `TrioRenderer.java` 出图，不需要设备就能看几何。工装内嵌的
+   `SharedPreferences` 替身**必须叫 `FakePrefs`** —— 叫 `Prefs` 会遮蔽真正的
+   `io.github.yixing233.hyperduo.Prefs`，导致常量解析失败。渲染器依赖的外观规则全部在 `TrioAppearance` 里，
+   所以它必须和 `TrioRenderer` 一起编进去，否则 `work\overview\run.ps1` 会以
+   `cannot find symbol` 失败。垫片出图与真机不符时，**先怀疑垫片**（历史上
+   `Canvas.restoreToCount` 的语义错实现过一次，症状是画布变换泄漏到后续所有绘制；矩形样式的
+   `drawRoundRect` / `Path.addRoundRect` 也一度只有真机 API、垫片缺失）。
 2. **上机验证**：`install.ps1` 装机后重启 SystemUI，看日志与状态栏实拍。
 
 另有 `work\gapcheck\verify.ps1`（不入库）专门盯**电量环缺口**：它把同一份 `GapProbe` 跑两遍 —— 一遍
@@ -710,8 +957,117 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
 两版之间哈希逐行相等，锁住「本改动只影响居中模式」。探针产出 `work\slotcheck\out\slots-{old,new}.png`
 六格对照图，格下说明走 `caption` 逐字换行并对超宽/超高一并 `throw`（同样是「宁可失败也别裁字」）。
 
+另有 `work\dualsimcheck\verify.ps1`（不入库）盯**双卡开关的判定规则本身**。`gapcheck` 与 `slotcheck`
+测的是电量弧算术与居中优先级，都不覆盖「什么时候才该画两排」；`overview` 只画出一个双卡格，证明
+的是**两排画得出来**，不是**只在该画的时候画**。它把同一份 `DualSimProbe` 跑**三遍**，每次只换一个
+文件：`fixed` 编工作树；`bolt` 把两处 `dualSimRows` 调用点从 `charging` 换回 `bolt`；`narrow` 把
+`GAP_START_DUAL`/`GAP_END_DUAL` 退回 `GAP_START_IDLE`/`GAP_END_IDLE`（即用户投诉的上排拥挤状态）。
+探针分五组断言：`rule()` 逐条查 `dualSimRows` 的真值（无 Wi-Fi 无充电双卡为真；有
+Wi-Fi 墨迹 / 充电 / 只读到一张卡 / 一张都没读到 / 开关关 / 移动信号表关，六种情形全假）；`layoutFlag()`
+直击那个真缺陷——`showValue=false`（于是 `drawsBolt()` 为假）时插着充电器，`Ring`/`Rect` 的 `dual`
+标志必须仍为假；`pixels()` 用 MD5 逐像素哈希要求「被抑制的帧」与「开关关掉」的帧**完全相同**（这才
+叫回退成单排），并要求该画时两者必须不同；`rows()` 按 `DOTS_DUAL` 与 `inkScale` 复算 8 个圆心、读
+圆心核心区 alpha，锁住**上排 = slot 0**；`separation()` 把上排拥挤变成可断言的量——对每个点从其
+**中心像素**做迭代式 4-连通 flood fill，要求连通域面积约等于单个点（`area / (π·DUAL_DOT_R²·scale²)
+< 2.5`），因为一旦与弧的圆帽连成一体，面积会涨到数倍（`narrow` 版实测外侧两点为 **8.22 / 5.58** 个
+点面积，`fixed` 版 8 个点全是 **0.97..0.99**）。`fixed` 必须 `exit 0`，`bolt` 与 `narrow` 必须
+`exit 1`（实测分别 3 条、2 条不符）。
+
+要给用户看这次修复的前后差别，用 `work\dualsimcheck\before-after.ps1`：它编两遍（工作树 vs 把两个
+`GAP_*_DUAL` 换回 idle 值），再用 `TopZoom.java`（12 点钟区域放大 3 倍）与 `DualSimShot.java`
+（四态总览）各出一张，最后由 `Panels.java` 拼成上下两栏的 `out\top-before-after.png` 与
+`out\dualsim-before-after.png`。**一次编译只能表现一个几何**，所以对照必须两次编译 + 外部拼图。
+
+**采样坑（踩过一次）**：`rows()` 最初取 26px 窗口内的**最大** alpha，结果 `{2,4}` 时最外侧的上排点
+被判成亮——它在 720px 图上是 `(522,102)`，离圆环弧只有约 25px，窗口把弧吃了进来。正确做法是读圆心
+**核心区**取**最小** alpha：亮点为 255、轨道点恰为 `trackAlpha`，两者判然可分。只看窗口内亮点计数或
+最大值都会把「紧挨弧的点」读反。
+
+另有 `work\outringcheck\verify.ps1`（不入库）盯**环内/环外与两个新开关的真值表**。它编
+`work\outringcheck\src\io\github\yixing233\hyperduo\OutRingProbe.java`，分五组：
+
+- `foldRule()` 逐条查 `TrioAppearance` 的表面：环内 `signalDots()`/`foldsMobile()` 为真而
+  `stackedOut()` 为假；环外 + 堆叠关三者**全假**（并显式断言「mobile 槽原样留着，MIUI 才有图标可画」）；
+  环外 + 堆叠开为 假/真/真；再叠 `data_sim_only` 仍为 真/真；总开关关、`show_mobile` 关各自
+  「不折叠也不自绘」；最后两条查 `Rect.dots` 与 `Ring.dual` 在环外都为假。
+- `inRingUntouched()` 是**环内逐字节不变**这条承诺的可执行版本：3 组槽位读数 × 2 种双卡开关 ×
+  2 种样式共 12 组，要求 `signal_mode=环内` 时「两个新开关都关」与「都开」的 720×720 渲染哈希**相等**。
+- `reading()` 查 `outSignalLevels` 的读数解析（两卡取槽序、单卡只画柱、`dataSimOnly` 命中上网卡、
+  上网卡沉默时退回另一张已应答的卡等 11 组）。
+- `geometry()` 查参考图比例式（列数、柱高严格递增、`STACK_INK_W/H` 与 `STACK_BAR_H[3]+gap+D` 的关系）。
+- `pixels()` 在真实画布上验柱底共线、最高柱在最右、未点亮列既不透明也不与点亮列同色、点行在柱底下方。
+
+两条反例构建都由 `[regex]::Replace` 从工作树文本生成：`refold` 把 `foldsMobile()` 尾上 `|| signalOutOfRing`
+（环外一律折叠，模拟「交还系统却把系统图标摘了」），`inert` 把 `signalDots()` 尾上 `&& !stackedSignal`
+（环内也被堆叠开关压住）。`fixed` 必须 `exit 0`，两条反例必须 `exit 1`（实测分别 3 条、14 条不符）。
+脚本开头有一道**源码钉**：`TrioHooks.java` 里若已不存在 `if (a.foldsMobile())` 就直接 `throw`——
+否则探针会变成在测一条没人调用的规则。
+
+**为什么断言「未点亮」要挑对列**：`pixels()` 最初在第一列取点验底纹，而三点读数下第一列的点是亮着的，
+于是那条断言恒假，看起来像产品缺陷。改成在**第四列**取样（三点的读数下第四列必暗）并补一条
+「未点亮的点仍在屏幕上（alpha > 0）」才通过。断言「没有」必须取**确定没有**的位置。
+
+**与参考图的数值化比对**（`work\outringcheck\OutSignalShot` + `compare.py`，不入库、不参与 `verify.ps1`）：
+`OutRingProbe` 只能证明源码自洽 —— 它拿 `TrioGeometry` 的常量去核对 `TrioRenderer` 用它们画出来的像素，
+两边同时错也照样通过。要抓这类错只能出图：`OutSignalShot` 把三种读数按**参考图 1 单位 = 1 像素**画在
+恰好等于各自 ink box 的画布上（`scale` 恰为 1，没有任何取整问题），产出 `work\outringcheck\out\out-signal.png`；
+`compare.py` 再用**同一套量法**分别量参考图与渲染结果，比列数、列距、柱宽、四根柱高、点行直径、
+柱底到点行的空带。**两边都量**是关键：不拿源码里的数字去核对源码。
+
+这条比对当场抓到一个真错误：空带本是 **9** 而不是 10。参考图无抗锯齿、边缘落在整像素上，柱底最后一行
+墨是 237（下边缘 238）、点行第一行墨是 247，空带 `238..246` = 9；按「两段墨迹首行下标相减」量会得到 10。
+原先的 `STACK_DOT_GAP = 10f` 因此让整个读数高一个单位（`STACK_INK_H` 210 → 应为 209）。改成 9 后
+`compare.py` `exit 0`，三格（两卡 4 柱+4 点 / 单卡 4 柱 / 仅上网卡 2 柱）的量测与参考图逐项相等。
+
+另有 `work\simcheck\verify.ps1`（不入库）盯**订阅号到槽位的映射**与**单排兜底**——这是双卡信号里唯一
+无人覆盖的一段。上一条 `dualsimcheck` 验的是「什么时候画两排」，`overview` 验的是「两排画得出来」，
+而**哪一排是卡一**、以及**只画一排时画哪张卡**，都发生在 `TrioState.sampleSims` 里，只有真机
+SystemUI 进程会跑到它。它把真实的 `app\src\main\java\io\github\yixing233\hyperduo\TrioState.java`（不是
+`work\preview` 里那个同名桌面替身）编进一套 `android.telephony.*` 垫片里跑两遍：一遍编工作树，一遍把
+`final int slot = info.getSimSlotIndex();` 换成 `info.getSubscriptionId()`（**只动这一行**）。探针分七组：
+`plumbing()` 查无 context 时惰性、attach 后才通；`mapping()` 是核心——**故意用与槽位不相等的订阅号**
+（`subId 9 → 槽 0`、`subId 5 → 槽 1`）断言电平落在**槽**而非订阅号上，另加反向槽序与一个槽位越界的
+订阅（不贡献任何一排、但 `sDataSlot` 仍解析出来）；`fallback()` 断言图标链静默时取**当前上网卡**而非
+槽 0，且上网卡自己没读数时**不从槽 0 借**；`gating()` 断言开关关且图标链已答时**根本不去问 telephony**；
+`degrade()` 逐项拔掉订阅服务 / telephony 服务 / 订阅列表 / `createForSubscriptionId` / `getSignalStrength`，
+要求**要么保留上一轮读数、要么降级为 -1，绝不误报**，并锁住「电平 0 是真实读数（有卡无服务）」与
+「0..4 之外一律拒绝、不钳制」；`pollNow()` 要求事件驱动刷新**只在真变化时**报变化；`miuiLevel()`
+（第五组加的那批）钉住**读的是 MIUI 的电平而不是 AOSP 的**——见「双卡信号」一节的说明。
+现在共 **47 条断言**，且是**三构建**对照：固定版必须 `exit 0`（47 条全 `[ok]`）、
+「订阅号当槽位」版必须 `exit 1`（实测 27 条不符）、「把 `miuiLevel(strength)` 换回 `strength.getLevel()`」
+版必须 `exit 1`（实测**恰好 4 条**不符，且正是那 4 条 MIUI 断言 ⇒ 分离度精确到条）。
+
+**门控判定的坑（踩过一次）**：`gating()` 一开始对每次 `refresh()` 都新建 host，结果它是被 2 秒限流
+而不是被开关拦下的——断言会**因为错误的原因通过**。必须复用同一个 host、并在两次 `refresh()` 之间把
+`SystemClock.now` 步进 2 秒以上，让限流不再起作用，测的才是门控本身。
+
+前三条工装都直接驱动渲染器，所以**渲染器的私有签名一改就会连带弄坏它们**，而它们又不在
+`:app:compileDebugJavaWithJavac` 里，改完主代码不跑一遍是发现不了的。已知会咬人的三处：`drawBattery`
+在 `TrioAppearance` 抽取后从收 `TrioSettings` 改成了收已解析的 `TrioAppearance`；`drawInto` 在双卡信号
+里于 `mobileType` 之前插入了 `int[] slotLevels`；三个工装的编译源清单里还必须带上
+`TrioAppearance.java`（渲染器把外观规则全问它），但**不能**带 `PreviewMain` / `OverviewMain`
+——`slotcheck` 的旧版构建会拿它们去调旧渲染器，编译期就失败。因此 `GapProbe` 按新签名反射，
+`SlotProbe` 则在运行期先找带 `int[].class` 的 `drawInto`、找不到再退回旧签名并补 `null` 占位，
+这样同一份探针源码能同时链上新旧两版渲染器。`DualSimProbe` 走的是当前签名，因此它只编当前
+`TrioRenderer`，靠换 `TrioAppearance` 造反例。
+
+`simcheck` 是这里面唯一**不碰渲染器**的：它编的是 `TrioState.java`，因此受渲染器签名变化影响的是
+反过来的方向——它不能带上 `work\preview\src` 里的 `TrioState.java` / `TrioConfig.java`（同名桌面替身，
+会撞类），只能借那里的 `SharedPreferences.java` 与 `Bundle.java` 两个纯垫片；`TrioConfig` 则由
+`simcheck\src` 自带一份**可设置的**替身（开关要在运行中途翻），`Refl.java` 是纯 JDK 所以直接编真源。
+**替身要跟住真 `TrioConfig` 的公开面**：加 `appearance()` 那次（`refresh()` 改读
+`appearance().stackedOut()` 来决定要不要为环外读数采分卡电平）替身没跟上，`simcheck` 立刻以
+`TrioState.java:199: 错误: 找不到符号` 失败——所以替身补了 `appearance()`（`TrioAppearance.of(snapshot)`，
+该类是纯 Java、无 android 端口，能直接编），并把 `TrioAppearance.java` 加进编译源清单。
+`TrioConfig` 或 `TrioState.refresh()` 的采样门控一改，就要先跑这条工装再谈别的。
+改完渲染器请把五条 `verify.ps1` 都跑一遍；动过 `TrioState` 的采样逻辑则补跑 `work\simcheck\verify.ps1`；
+动过 `TrioAppearance` 的规则谓词则补跑 `work\outringcheck\verify.ps1` 与 `work\dualsimcheck\verify.ps1`；
+**动过环外读数的几何常量**（`TrioGeometry` 的 `stacked out-of-ring signal` 一节）还要重跑出图工装
+`work\outringcheck\OutSignalShot` + `compare.py` —— 那批常量只有它与参考图逐项比对过，五条
+`verify.ps1` 里没有一条能发现「常量整体偏一个单位」这类错。
+
 另有 `work\overview\run.ps1`（不入库）：把渲染器**实际支持的每一个样式**画成一张状态总览图
-`work\overview\out\overview.png`（1788×2248，3 组共 25 格）。它复用 `work\preview` 的桌面垫片，
+`work\overview\out\overview.png`（1788×2248，3 组共 26 格）。它复用 `work\preview` 的桌面垫片，
 每格都以 `TrioSettings.defaults()` 为底再叠加该格的单项 tweak，因此代表的始终是出厂外观。用途有二：
 一是改渲染器后一眼看全所有样式的回归（新样式没进这张图就等于没被清点），二是给用户/文档出图。
 出图脚本会打印被编译的 `TrioRenderer.java` 的 SHA256，便于确认图对应哪份代码。
@@ -726,16 +1082,19 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
 注意两个「居中」不是一回事，别混：电池组里的「**无 Wi-Fi 时**数字居中」是**自动**行为
 （`wifiInk` 为假时数字自己掉进圆心，没有开关），Wi-Fi 组里的「电量数字居中」才是那个**设置项**
 （`swap_wifi_value`，用户手动打开）。
-- 移动信号与网络类型 8 格：信号 4 格 / 2 格 / 无信号 / 网络类型环内 4G / 环内 5G / 环内 5GA /
-  类型关闭 / 类型环外。**环外类型不由本 Canvas 绘制** —— 它由 `TrioHooks` 另建的
-  `OutTypeLabel extends TextView` 画在电池表左侧，所以那一格是手绘标签示意，不是渲染器输出。
+- 移动信号与网络类型 9 格：信号 4 格 / 2 格 / 无信号 / 双卡信号（4 / 2 格）/ 网络类型环内 4G /
+  环内 5G / 环内 5GA / 类型关闭 / 类型环外。**环外类型不由本 Canvas 绘制** —— 它由 `TrioHooks`
+  另建的 `OutTypeLabel extends TextView` 画在电池表左侧，所以那一格是手绘标签示意，不是渲染器输出。
+  双卡格故意取两卡电平不同（4 / 2），这样它若悄悄退化成单排会「看起来就不对」，而不是看起来像
+  一个合理的单卡读数。双卡格在图上仍走圆环样式（矩形样式的两列本来就各认一张卡）。
 
-**造型参数不入图**：环线／弧线粗细、数字／类型字号、底纹浓度、状态颜色开关这些是外观旋钮，
-不是图标状态，因此总览图不再单列「外观与几何」一组。要看这些的边界值就改设置界面的滑块；
-它们不构成需要清点的能力面。
+另有一条只在双卡手机上会露面的形状：「双卡信号」（`dual_sim_signal`，见「双卡信号」一节）。
+它在**无 Wi-Fi 且未充电**时把一排点换成上下两排（上排卡一、下排卡二），圆环样式下两排落在
+圆环的两个缺口里（上排那个缺口会被张到与底部开口等宽，否则点会与环的圆帽糊在一起），
+矩形样式下两列各认一张卡。判定收在 `TrioAppearance.dualSimRows` 一处，渲染端只问「画几排」。
 
 参考的 macOS 版总览图里还有两组本模块**没有实现**，不要误画：**蓝牙音频**（4 格）与**音量**（7 格）
-在 `app\src\main\java\com\hyperduo\trio` 下搜 `volume|bluetooth|audio|headset|earbud` 无任何匹配。
+在 `app\src\main\java\io\github\yixing233\hyperduo` 下搜 `volume|bluetooth|audio|headset|earbud` 无任何匹配。
 此外参考图的「已连接电源，未充电」也无对应状态 —— 渲染器只有充电 / 未充电两态，不区分插电未充。
 
 ## 验证记录
@@ -775,6 +1134,15 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
 - 安装被拒的两条路径分开处理：`InstallResult.NeedsPermission`（缺「安装未知应用」授权）弹出提示
   并跳到该设置页；`InstallResult.NoInstaller`（设备上没有能处理安装 intent 的应用）只弹提示，
   不跳设置页 —— 授权已经给出时把用户送去设置页会让他面对一个无处可改的界面。
+- 「查看仓库」：更新卡片最后一行，**是卡片里唯一无条件存在的行**；卡片其余各行都遵守「只有动作
+  当前可行时才出现」的规则，这一行故意破例——用户最需要仓库的时刻恰恰是卡片答不上来的时候
+  （作者尚未发布 Release、检查失败、changelog 说得不够）。放在最后因此不打断
+  「检查更新 → 下载更新 → 安装」的主线。地址取自与 `API_LATEST` / `RELEASES_PAGE` 同一个
+  `REPO` 常量（`REPO_HOME`），三者不可能漂移；与「打开发布页面」互补，一个看源码一个看 Release。
+  `openReleasePage(url)` 因该行为而更名为 `openInBrowser(url)`（它本来就是 URL 泛型的，
+  旧名字对第二个 URL 是谎话），没有留下别名。`assembleDebug` 通过，`aapt2 dump resources`
+  确认 `update_repo` / `update_repo_summary` 在中英两个 locale 都已打包。**未上机验证**（当时无
+  adb 设备）：行的渲染、点击后浏览器打开仓库主页这两条仍需真机确认。
 - release 构建注入验证：`-PhyperduoVersionName=1.2 -PhyperduoVersionCode=10200` 产出的 APK
   经 `aapt2 dump badging` 确认 `versionCode='10200' versionName='1.2'`；解包后 `dexdump` 确认
   hook 侧与更新器全部类均未被 R8 剥离。
@@ -963,7 +1331,7 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
   （SHA-256 `b4e3a12d…8c41f`），所以能 `-r` 覆盖安装而不冲突。
 - **1.1 release 包上机验证**（这一步不可省：R8 会剥离反射用到的类）。`adb install -r` Success，
   `versionCode=10100` / `versionName=1.1`、`pkgFlags` 里 **没有 `DEBUGGABLE`**（release 构建）。
-  类名在 dex 里是**斜杠描述符**（`Lcom/hyperduo/trio/TrioHooks;`），用点号搜会全部假阴性 ——
+  类名在 dex 里是**斜杠描述符**（`Lio/github/yixing233/hyperduo/TrioHooks;`），用点号搜会全部假阴性 ——
   `TrioHooks` / `TrioRenderer` / `TrioConfig` / `Prefs` / `TrioSettings` / `HyperDuoModule` /
   `ui/RestartController` 全部在 `classes.dex` 里，未被剥离。SystemUI 重启后
   `HyperDuo installed, hooks=9 enabled=true`、`reload receiver registered`，无 `FATAL EXCEPTION`。
@@ -997,3 +1365,262 @@ Wi-Fi 0..3 四个哈希各不同、环内类型扰动圆心、缺口以下也被
   ——反射入口在 R8 下存活。截图 `work\ondevice\release-1.3-statusbar.png`（裁切放大
   `release-1.3-icon-4x.png`）目视确认居中优先级修复在正式包里生效：**缺口里是小闪电、
   圆心是 `100`**（若拿 debug 包验证，就等于没验证 R8 这一层）。
+- **双卡信号（`dual_sim_signal`）离线验证**：`work\overview\run.ps1` `exit 0`，
+  `work\overview\out\overview.png` `1788×2248`、3 组 **26 格**（移动信号组 8 → 9 格），
+  `renderer = 38011f32635075984f70fca4c17ab519a71a70f4329dd12e3e543d6eb8b8892f`；
+  新增格「双卡信号（4 / 2 格）」目视确认：两排点分别落在圆环的上下两个缺口里、两排都用
+  `DUAL_DOT_R = 7.0f`、数字 `79` 居中，与参考图一致。`work\preview\out\04-dual-sim.png`
+  （`slotLevels = {4, 2}`、无 Wi-Fi、电量 79）单张复核同形。双卡格**故意取两卡电平不同**
+  （4 / 2）：若哪天它悄悄退化成单排，出图会「看起来就不对」，而不是看起来像个合理的单卡读数。
+  上下排与 slot 的对应关系**不靠肉眼**（288×288 缩略图上看不出每排几点，容易把两排读反）：
+  `work\dotprobe\DotProbe.java` 反射取 `TrioGeometry.DOTS_DUAL` 与 `TrioRenderer.inkScale`，
+  按渲染器同一套平移/缩放算出 8 个圆心，再在每点邻域统计亮点。实测（`inkScale = 2.15319`、
+  `tx = ty = 15`）：`DOTS_DUAL[0..3]`（设计 y < `B_CY`，上排 = slot 0 = 卡一）**4 点全亮**；
+  `DOTS_DUAL[4..7]`（下排 = slot 1 = 卡二）**前 2 点亮、后 2 点灭**（第 7 点 `maxv = 78`，
+  即只有 `trackAlpha` 的灰）。与 `slotLevels = {4, 2}` 逐点吻合，确认上排=卡一、下排=卡二。
+  测量时要注意相邻点窗口重叠：灭点若紧挨亮点，窗口里会漏进几个亮像素（第 6 点测得 31 px、
+  质心偏 29.5 px 靠左），判断某点是亮是灭要看该点圆心附近的 `maxv`，不能只看窗口内亮点计数。
+  `:app:assembleDebug` `BUILD SUCCESSFUL`（`37 actionable tasks: 13 executed`）。
+  `work\gapcheck\verify.ps1` 与 `work\slotcheck\verify.ps1` 均 `exit 0`：两次`drawInto` 加参、
+  `drawBattery` 改收 `TrioAppearance` 之后，两条工装都已改到能同时链上新旧两版渲染器（见「测试」
+  一节的三处坑），固定版/新版必须 `exit 0`、旧算法/旧版必须 `exit 1` 各自成立。
+- **双卡开关判定规则离线验证（第二轮补）**：`work\dualsimcheck\verify.ps1` `exit 0` —— 固定版
+  `exit 0`（21 条断言全 `[ok]`）、把两处 `dualSimRows` 调用点换回 `bolt` 的反例版 `exit 1`
+  （恰好那 3 条「充电中且 `show_value=false`」断言不符）。这条工装是为了补上一个**此前没被测过**
+  的洞：`overview` 只证明双卡格画得出来，`gapcheck`/`slotcheck` 测的是电量弧与居中优先级，**没有
+  任何一条覆盖「什么时候才该画两排」**。而补测的过程本身查出一个真缺陷：`dualSimRows` 第 2 参在
+  javadoc 里是「设备是否插着充电器」，两个调用点（`Ring`/`Rect`）却都传了 `bolt`，而
+  `bolt = charging && drawsBolt()`、`drawsBolt() = showBolt && showValue`，于是**关掉「显示电量
+  数字」后插着充电器也会画出两排**，既违反 javadoc 也违反用户原话的「没充电」。修复即把两处改传
+  `charging`（`TrioAppearance.java`，附注释说明「是插头不是闪电」），`TrioSettings.dualSim` 的
+  javadoc 与 `docs` 里「没有闪电（`charging` 为假）」这句同样含混的措辞也一并订正为「没插充电器」。
+  顺带记一条采样坑：`rows()` 最初取窗口内**最大** alpha，`{2,4}` 时最外侧上排点被圆环弧（相距
+  约 25px）带亮而误判；改读圆心**核心区取最小** alpha 后，亮点 255 与轨道点 `trackAlpha=56`
+  判然可分（实测 `core alpha 255 255 255 255 / 255 255 56 56`）。
+- **双卡上排拥挤的修复与离线验证（第四轮补）**：症状是用户指出「上排显示不完整、空间太少、应该
+  上下对称」——上排外侧两点与圆环 12 点钟缺口的两个**圆帽**糊在一起，参考图里那种点与弧分明的样子
+  出不来。根因是量化的：上排是 `DOTS` 绕环心 `B_CY` 的镜像，外侧点几乎正落在弧中线 `B_R = 51.5` 上，
+  外点圆心到弧端点圆心只有约 **10.4** 个设计单位，而弧用 `STROKE.setStrokeCap(ROUND)` 收尾、帽半径
+  `ringStroke / 2 = 7`，加点半径 `DUAL_DOT_R = 7` 共 **14** ⇒ 必然重叠；下排落在弧**没盖住**的那段
+  自然开口里（`360 - B_SWEEP = 117.4°`），所以一直舒展。而两排共用的
+  `GAP_START_IDLE`/`GAP_END_IDLE` 只张 `0.35 * B_SWEEP = 84.9°`，比底部开口**窄 32.5°** —— 这正是
+  「不对称」的可量化来源。修法：新增 `GAP_START_DUAL = 1f - 180f / B_SWEEP ≈ 0.2581`、
+  `GAP_END_DUAL = 180f / B_SWEEP ≈ 0.7419`，在 `TrioRenderer.drawRingLayout` 里让 `r.dual` 优先取
+  这对值，使 12 点钟缺口与底部开口**等宽**，余量回到约 10 单位。顺带修掉一处叠加缺陷：`valueInCentre`
+  原先只看 `centreValue`/`(!wifi && !type)`，双排的上排占了缺口而 `valueInGap` 会把百分比数字送进
+  同一位置造成叠画，现在 `hasValue && (a.centreValue || dual || (!wifi && !type))` 让数字回到环心。
+  验证：`work\dualsimcheck\verify.ps1` `exit 0`，且升级为**三构建**对照——`fixed` `exit 0`（25 条断言
+  全 `[ok]`）、`bolt` 版 `exit 1`（3 条不符，仍是上一轮那条充电语义）、**新增 `narrow` 版**（把两个
+  `GAP_*_DUAL` 退回 idle 值，即用户投诉时的状态）`exit 1`（2 条不符）。新增的 `separation()` 组用
+  **连通域面积**把「挤不挤」变成断言：从每个点的中心像素做迭代式 4-连通 flood fill，要求
+  `area / (π·DUAL_DOT_R²·scale²) < 2.5`，实测 `fixed` 版 8 个点全是 **0.97..0.99** 个点面积，而
+  `narrow` 版上排外侧两点涨到 **8.22 / 5.58**（与弧合并成一体），下排 4 点作为对照始终 0.97..0.99。
+  同样一条断言在 `bolt` 版下**不**失败，说明它专盯几何、不与其他断言重复。
+  可视化复核：`work\dualsimcheck\out\dualsim.png`（2296×650，sha256
+  `824BFD162B5630D0EDCAA26A33585C41CFC3976B5A8CFAC0B9DB5D5006A418A4`）四格中第 ② 格已可见上排
+  四点完全脱离环的两个圆帽、与下排对称；关闭时只有下排、充电时只有一排且闪电在缺口、单卡时只有一排。
+  **改前/改后对照图**由 `work\dualsimcheck\before-after.ps1` 生成：它把同一份绘图代码分别与工作树的
+  `TrioGeometry`（双排缺口 = 底部开口宽度）和「两个 `GAP_*_DUAL` 退回 idle 值」的那份各编一遍，再由
+  `Panels.java` 拼成上下两栏，产出 `work\dualsimcheck\out\top-before-after.png`（1310×1592，12 点钟
+  区域放大 3 倍，由 `TopZoom.java` 裁切）与 `...\out\dualsim-before-after.png`（2316×1422，四态总览，
+  由 `DualSimShot.java` 出图）。**没有任何单次编译能同时画出两个几何**，所以必须两次编译各出一张再合并。
+  放大图里 `BEFORE` 栏上排外侧两点与弧的圆帽连成一体（`separation()` 实测 8.22 / 5.58 个点面积），
+  `AFTER` 栏四点是四个独立正圆、与弧留出明显空隙（0.97..0.99）。
+  同轮其余门禁复跑全绿：`gapcheck` `exit 0`（反例 42 条不符）、`slotcheck` `exit 0`（反例 6 条不符）、
+  `simcheck` `exit 0`（反例 23 条不符）、`overview` `exit 0`（1788×2248、三组 10/7/9 格、`total
+  cells = 26`、`renderer = eb3d8cbbd28e8a662df2759911e55620df672c47a09944c6a259178d19883817`），
+  `:app:assembleDebug` `BUILD SUCCESSFUL`（`app-debug.apk` 33426038 B、sha256
+  `C7F58E09590C6A875B8226C0A99D68254AAD25C6F3664EA879A9740D1054085C`）；dex 里查得
+  `dual_sim_signal` / `dual_sim_title` / `dual_sim_summary` / `DOTS_DUAL` / `DUAL_DOT_R` /
+  `dualSimRows` / `GAP_START_DUAL` / `slotLevels` / `pollSimsNow` / `attachContext` / `getSimSlotIndex` /
+  `getDefaultDataSubscriptionId` / `appearance` / `stackedOut` 全部命中（6 个 dex，`com/hyperduo`
+  零命中），确认本轮几何改动与新开关都进了交付物。这组哈希是**最后一次全绿时**的值，
+  同轮之后并发写者又动过 `TrioGeometry` / `TrioHooks` / `TrioRenderer` / `TrioState`，重跑会变；
+  **后被第七轮那次构建修复取代**（见「第七轮补」条：`app-debug.apk` 33434570 B、`AAEA3228…`）。
+  另记一条工装迁移
+  事实：本轮之前 app 整包改名为 `io.github.yixing233.hyperduo`，`work\` 下 25 个工装文件随之迁移
+  （`work\migrate-rename.ps1`），其中 `work\slotcheck\verify.ps1` 需要把「工作树路径」与「`git show`
+  用的旧提交路径」拆成两个变量（旧提交树里仍是旧路径），并把取出的旧源**重写包声明**后才编得过。
+  上机验证当时仍待补（设备未上线），第六轮补上了双排那条。
+- **双卡订阅号↔槽位映射与单排兜底离线验证（第三轮补）**：`work\simcheck\verify.ps1` `exit 0` —— 固定版
+  `exit 0`（42 条断言全 `[ok]`）、把 `final int slot = info.getSimSlotIndex();` 换成
+  `info.getSubscriptionId()` 的反例版 `exit 1`（实测 23 条不符）。补它的原因：双卡信号里画得对不对
+  已有三条工装，而**哪一排属于哪张卡**、**只画一排时画哪张卡**只在 `TrioState.sampleSims` 里决定，
+  且只在真机 SystemUI 进程会跑到；参考机上 `subId` 恰好等于槽位（subId 1 在槽 0、subId 2 在槽 1），
+  所以「把订阅号当槽位」这种写法在那里**看起来是对的**，本工装因此故意用不相等的 `subId 9 → 槽 0`、
+  `subId 5 → 槽 1` 来暴露它。实现手法：真实 `TrioState.java` 只依赖 `Refl`（纯 JDK）与 `TrioConfig`，
+  于是自带一套 `android.telephony.*` 桌面垫片就能跑，不需要 Xposed、也不需要设备。另记两条坑：
+  一是 `gating()` 对每次 `refresh()` 新建 host 时，拦下采样的其实是 2 秒限流而不是开关，断言会
+  「因为错误的原因」通过，必须复用同一 host 并在两次 `refresh()` 之间步进 `SystemClock.now`；
+  二是编译源**不能**带 `work\preview\src` 里的 `TrioState.java` / `TrioConfig.java`（同名桌面替身撞类），
+  只能借它的 `SharedPreferences.java` 与 `Bundle.java`。
+  **上机验证（当时）仍待补**：设备 `192.168.1.148:33945` 已下线（`adb connect` 失败、
+  `Test-Connection -Quiet` 为 `False`、`adb devices` 只剩一条 `offline`）；第六轮补到了
+  「真双卡手机在无 Wi-Fi 未充电时画出两排点」这条。但**「只插一张卡时退化成单排、
+  且那排是当前上网卡」至今仍只有离线证据**（`work\simcheck\verify.ps1` 的 counterexample
+  用 subId 9 → 槽 0、subId 5 → 槽 1 的错位映射来暴露「把订阅号当槽位」的写法），
+  真机没拔过卡，这条不要当成已验收。
+- **改名后的真机部分验收（第五轮补，双排本身未拍到、由第六轮补上）**：设备经无线 adb 短暂上线（`192.168.1.148:38661`，
+  houji / model `23127PN0CC` / Android 17 / SDK 37 / `wm size` 1200x2670 / density 480），
+  本轮取到三条真机事实：
+  1. **改名后的包已自动进入 LSPosed 且已加载**。`modules_config.db` 里新包
+     `enabled = 1`、`scope` 含 `com.android.systemui`；旧包 `com.hyperduo.trio` 已从设备卸载
+     （`pm list packages -f hyperduo` 只剩新包）。**不需要手工往作用域里拖**：LSPosed 按
+     `applicationId` 建行，改名后第一次启动模块就自己登记了。截图
+     `work\device\out\bar-wifi-on.png`（1200x2670）右侧可见 `13.4 KB/s` + `5G` + 三合一轮
+     （环内 `85`、环下四点）——**证明改名 + `TrioAppearance` 重构后的代码在真机 SystemUI 里
+     真的跑了**，这比任何离线渲染都强。
+  2. **真机是双卡，且未充电**：`dumpsys isub` 里 `id=1 … simSlotIndex=0 … 中国移动`、
+     `id=2 … simSlotIndex=1 … 中国广电`（`getAvailableSubscriptionInfoList: [1, 2]`，
+     恰好 `subId = slot + 1`，这是参考机的巧合，不是契约）；`dumpsys battery` 三项
+     `powered` 全 `false`、`level: 85`、`status: 3`。⇒ 双排的两个前提（未充电、双卡）已满足。
+  3. **卡在「无 Wi-Fi」这一步**：`dumpsys wifi` 为 `Wi-Fi is enabled`，而无线调试本身走
+     Wi-Fi，`adb shell "svc wifi disable"` 一执行就 `error: closed` / `device offline`，
+     之后十余次 `adb connect` 全部失败。**教训：这台设备上不能用 `svc wifi disable` 制造
+     「无 Wi-Fi」状态，那等于自断控制通道。**
+  因此 `work\device\acceptance.ps1` 改用**语义等价的替代触发**：发模块自己的 reload 广播把
+  `show_wifi` 置假（`am broadcast -a io.github.yixing233.hyperduo.action.RELOAD -p
+  com.android.systemui --ez enabled true --ez show_wifi false --ez dual_sim_signal true`）。
+  这之所以合法，是因为判定规则读的是 `wifiInk`（屏幕上有没有 Wi-Fi 墨迹），不是物理 Wi-Fi
+  开关；而 `TrioConfig.onReloadBroadcast` 对不含 `KEY_ENABLED` 的 extras 直接忽略、对缺失的键
+  一律沿用**上一次快照**（`TrioSettings.fromBundle(bundle, base)`），所以只带这三个键就只改这
+  三个键，其余设置不会被清掉。脚本另含：设备事实、包与旧包检查、LSPosed 配置库判读
+  （Java 序列化 boolean 只看 `data` 列**最后一个字节**）、充电/双卡读数、SystemUI 日志里新包
+  是否出现、以及关机屏截图。
+  **仍未完成的验收，以及为什么主机侧帮不上忙**：截图里还没看到两排点。后来设备整个从局域网
+  消失——`arp -a` 里没有 `.148` 的 MAC，`ping -S 192.168.1.180 192.168.1.148` 得到
+  `Destination host unreachable`（同法 ping 网关 `192.168.1.1` 正常，`time<1ms TTL=64`），
+  异步扫 `192.168.1.0/24` 只有 `192.168.1.1` 与 `192.168.1.180` 活着。**恢复只能靠用户在手机上
+  手动重开 Wi-Fi 与无线调试。** 另记一条主机侧陷阱：本机 FlClash 是 TUN 模式
+  （`198.18.0.1/30`，默认路由 `0.0.0.0/0 → 198.18.0.2 metric 0`），
+  `Find-NetRoute -RemoteIPAddress 192.168.1.148` 判给 `FlClash` 而不是`以太网`，于是
+  **任何 TCP 连接都会「成功」**——早先那次「1024..65535 几乎全开」的端口扫描是假象，
+  不能用 `TcpClient.ConnectAsync` 判断端口是否开放，要看 `Find-NetRoute` 或 `adb devices`。
+  当前 shell 非管理员，加不了静态路由绕开它。
+- **真机双排验收完成（第六轮补）**：设备重开 Wi-Fi 后回到局域网，**端口又变了**
+  （用户给的 `192.168.1.148:38661` 变 `10061` 拒绝）。这次先跑 `adb mdns services`，
+  直接问出真正在听的端口 `_adb-tls-connect._tcp 192.168.1.148:35237`，连上即 `device`。
+  **教训：无线调试端口每次重开都变，别再猜或扫端口，直接 `adb mdns services`。**
+  设备事实与上轮一致（houji / `23127PN0CC` / release 17 / SDK 37 / `wm size` 1200x2670 /
+  density 480）；模块本机 prefs 里 `dual_sim_signal=true`、`mobile_type_mode=2`、
+  `swap_wifi_value=true`；`dumpsys battery` 三项 `powered` 全 `false`、`level: 75`；
+  `dumpsys isub` 仍是 slot 0 = 中国移动（subId 1）/ slot 1 = 中国广电（subId 2），
+  `defaultDataSubId=2`、`activeDataSubId=2`。
+  验收手法与结果：先 `screencap` 拍下 Wi-Fi 在屏的基线（`work\device\out\bar-wifi-on.png`，
+  裁剪 `tall-wifi-on.png`：环内 `75`、上排位置是 Wi-Fi 弧、**只有一排点**），再发那条 reload 广播
+  把 `show_wifi` 置假，同一位置再拍（`bar-dual.png` / `tall-dual.png`）——**真的出现两排点，
+  上下对称**，Wi-Fi 弧消失、百分比仍居中 `74`。随后再发一条 `show_wifi true` 把设置还原
+  （`bar-restored.png` / `tall-restored.png`：Wi-Fi 弧回来了、又只剩一排），确认这条触发路径
+  可逆、没有留下副作用。三态拼图 `work\device\out\device-dual.png`（1020x2278，
+  sha256 `53ABB0A709E4E21BFC7B8E781C9BF82A8CC142ECF15977A3CC0920FD8DD8ABB5`，由
+  `Panels` 生成）。
+  **对称性是量出来的、不是看出来的**：对 `tall-dual.png`（`Crop` 放大 5 倍，1100/5 比例）跑
+  `work\refimg\Analyze.java`，六颗点的质心给出环心 `y = 365.18`，于是
+  上排三点在上方 `108.19 / 126.94 / 128.19`，对应的下排三点在下方
+  `109.12 / 126.82 / 128.31` ⇒ **三对偏差 `0.93 / -0.12 / 0.12` 裁剪像素，
+  即最大 `0.19` 设备像素**（内两对在 `0.03` 设备像素内）。这正是 m02630 要的「上下对称」，
+  也是 `GAP_*_DUAL` 那两行几何改动的真机证据。
+  同轮 `Analyze` 还确认六颗点的外接框都是 `35x35`（`area=900/925`），即**同样大的正圆**：
+  上排没有被环的圆帽吃掉，也没和弧粘成一个 blob（离线侧同一结论的数字是分离度 `0.97..0.99`）。
+  真机取证的工装细节：`Crop` 与 `Panels` 都在
+  `work\dualsimcheck\after-classes`（`io.github.yixing233.hyperduo.Crop/Panels`），
+  `java -cp <那个目录> io.github.yixing233.hyperduo.Panels …`；`Panels` 不传全限定名会
+  `ClassNotFoundException: Panels`。`Analyze` 在 `work\refimg\classes`（**默认包**，
+  `java -cp … Analyze`）。`screencap` 写进 `/sdcard` 再 `adb pull` 仍比 `exec-out` 稳。
+- **未转义撇号把构建弄坏、aapt2 才是可信报错源（第七轮补）**：这一轮 `:app:assembleDebug`
+  突然失败在**并发写者新加的英文串**上（不是双卡那部分改动）：
+  `app\src\main\res\values-en\strings.xml:50:4: Failed to flatten XML for resource
+  'stacked_signal_summary' with error: Invalid unicode escape sequence in string` +
+  `…:50:4: string/stacked_signal_summary does not contain a valid string resource.`
+  + `> Task :app:mergeDebugResources FAILED`。**这条信息严重误导**：按字节扫两个
+  `strings.xml`，`0x5C`（反斜杠）计数为 **0**，严格 UTF-8 校验通过、无 BOM；合并产物
+  `app\build\intermediates\incremental\debug\mergeDebugResources\merged.dir\values-en\values-en.xml`
+  也干净；**清掉 `…\incremental\debug\mergeDebugResources` 再建，报错一字不变**（所以不是增量缓存陈旧）。
+  **定位手法（值得复用）**：绕过 Gradle，用 aapt2 直接编一份资源副本 ——
+  `.tools\sdk\build-tools\37.0.0\aapt2.exe compile --dir C:\code\HyperDuo\work\resprobe -o out.zip`
+  （目录里放 `values\strings.xml` 与 `values-en\strings.xml` 两份），aapt2 才说出真话：
+  `strings.xml:52: error: unescaped apostrophe in string`，直指 `… the system's own mobile signal
+  icon is kept.`。⇒ **aapt2 报「Invalid unicode escape sequence in string」时，多半其实是
+  「字符串里有未转义的撇号」（`'` 必须写成 `\'`，或把整串用 `"…"` 包起来）；Gradle 那条信息
+  不可信，遇到就先 aapt2 直编定位，别去清缓存。** 中文版 `values\strings.xml:52` 无此问题
+  （撇号本来就不出现在中文串里），所以只改了英文那份。修复后 aapt2 `exit 0`，
+  `:app:assembleDebug` `BUILD SUCCESSFUL in 17s`，交付物刷新为
+  `app-debug.apk` **33434570 B**、sha256
+  **`AAEA3228AE3A9CAD848771ECFE5D0C580D28257F3817D41368DF31A75ED23736`**；
+  解包仍是 **6 个 dex**，`dual_sim_signal` / `dual_sim_title` / `dual_sim_summary` / `DOTS_DUAL` /
+  `DUAL_DOT_R` / `dualSimRows` / `GAP_START_DUAL` / `slotLevels` / `pollSimsNow` / `attachContext` /
+  `getSimSlotIndex` / `getDefaultDataSubscriptionId` **12 个串全命中**、`com/hyperduo` 零命中。
+
+
+- **包名更换为 `io.github.yixing233.hyperduo`（为进 LSPosed 仓库）**：起因是 LSPosed 的
+  反域名归属校验——`com.hyperduo.*` 要求根域 `hyperduo.com` 配一条
+  `lsposed-modules-repo-verification=<github 用户名>` 的 TXT 记录，而该域名虽在 Cloudflare
+  之下（RDAP：2004-02-04 注册、2027-02-04 到期、registrar Cloudflare），**TXT 记录为空**，
+  所以那条路走不通；提交 README 另有免域名通道——用 `io.github.{username}` 前缀即可，
+  不需要域名也不需要 TXT。于是 `com.hyperduo.trio` → `io.github.yixing233.hyperduo`。
+  改动面：17 个源文件从 `app\src\main\java\com\hyperduo\trio\` 迁到
+  `app\src\main\java\io\github\yixing233\hyperduo\`（16 个走 `git mv` 保留历史，1 个未跟踪文件直接移动），
+  包声明与 `import` 同步改写；`app\build.gradle.kts` 的 `namespace` / `applicationId`、
+  `app\proguard-rules.pro` 的两条 `-keep`、`META-INF\xposed\java_init.list` 的入口类、
+  `install.ps1` 与 `release.ps1` 的 `$Package` 一并更新。改写用 `UTF8Encoding($false)` +
+  `ReadAllText/WriteAllText`，**原有 LF/CRLF 与无 BOM 全部保持**（仅 `TrioConfig.java` 原本是 CRLF）。
+  有意**不动**的东西：`Prefs.NAME`（远程 preferences 组名，也是设置界面文件名，
+  改它等于丢用户设置）、签名配置名 / `keyAlias` / 以 `hyperduo` 开头的 Gradle property 名 /
+  keystore 与证书。`Prefs.ACTION_RELOAD` **跟着包名一起改了**（`…action.RELOAD`）——
+  它不是对外契约，收发的两端（`SettingsRepository.kt:177` 发送、`TrioConfig.java:157` 注册）
+  都用同一个常量，只要同一版本内自洽即可。`AndroidManifest.xml` 一个字节都没改——
+  组件名全是相对名（`.HyperDuoApp`、`.ui.MainActivity`、`.ui.MainActivityAlias`）自动跟随 `namespace`，
+  FileProvider authority 是 `${applicationId}.fileprovider` 也自动跟随。
+  离线验证：`:app:assembleDebug` `BUILD SUCCESSFUL in 37s`（`37 actionable tasks: 19 executed`，
+  日志里出现 `compileDebugKotlin` / `compileDebugJavaWithJavac` / `dexBuilderDebug`，
+  不是「全部 up-to-date」的假绿）；`aapt2 dump badging` → `package: name='io.github.yixing233.hyperduo'`；
+  `aapt2 dump xmltree` → `application` / `activity` / `activity-alias` / FileProvider authority
+  全部落到新包名，`de.robv.android.xposed.category.MODULE_SETTINGS` 仍在；APK 内
+  `META-INF/xposed/java_init.list` 的内容是 `io.github.yixing233.hyperduo.HyperDuoModule`；
+  按**斜杠描述符**扫 6 个 dex，`io/github/yixing233/hyperduo/…` 六个关键类全部命中，
+  `com/hyperduo/trio` 与 `com/hyperduo/yixing` 零命中。
+  **用户影响（必须写进 release notes）**：`applicationId` 变了就是另一个 app，
+  旧的 `com.hyperduo.trio` **无法原地覆盖升级**，设置与 LSPosed 作用域都不迁移，需要先卸载再装。
+  本文件上方的 v1.1 / v1.3 发布记录（字节核对、证书指纹、旧包名）是**历史事实，按当时原样保留**，
+  未随本次改名回填。
+- **卡信号环外样式与两个开关（第八轮补）**：新增 `signal_mode`（环内/环外）、`stacked_signal`、
+  `data_sim_only` 三个键，环外读数按 350×350 参考图自绘（四条递增圆头柱 + 下方一排圆点，见
+  「信号：环内与环外堆叠」一节）。本轮的判据收在 `TrioAppearance` 的 `signalDots()` /
+  `stackedOut()` / `foldsMobile()` 三个谓词上，`TrioRenderer.drawOutSignal` 与
+  `TrioHooks.OutSignalView` 各只有一处调用它们。
+  离线验证：新建的 `work\outringcheck\verify.ps1` `exit 0`（`fixed` 通过；`refold` 与 `inert`
+  两个反例构建分别 **3 条 / 14 条**不符而 `exit 1`）；既有四条 `gapcheck` / `slotcheck` /
+  `dualsimcheck` / `simcheck` 复跑全部 `exit 0`；`:app:assembleDebug`（`--offline`）
+  `BUILD SUCCESSFUL`，`compileDebugKotlin` 与 `compileDebugJavaWithJavac` 都真跑过，
+  不是「全部 up-to-date」的假绿。
+  **本轮由探针与出图抓出的三个缺陷**：
+  1. `stackedOut()` 漏了 `mobile`（「显示移动信号点」关掉后环外堆叠仍会自绘，把用户关掉的
+     那一项复活）。探针的断言原文是 `mobile meter off, out of ring stacked: no folding and no
+     reading`。补上 `mobile` 后 `show_mobile` 关即「两个位置都交还系统」。
+  2. 探针自身在**第一列**取样验底纹，而三点读数下第一列是亮的，断言恒假，看着像产品缺陷；
+     改到第四列并补一条「未点亮的点仍在屏幕上」才通过（见「测试」一节的同名段落）。
+  3. `STACK_DOT_GAP` 原是 10，实为 **9**（参考图无抗锯齿：柱底最后一行墨 237 即下边缘 238，
+     点行首行墨 247，空带 `238..246` = 9）。这个错 `OutRingProbe` 抓不到 —— 它两边都引用同一批
+     常量，自洽即通过；是 `OutSignalShot` 出图 + `compare.py` 拿**同一套量法分别量参考图与渲染
+     结果**才暴露的（`STACK_INK_H` 210 → 209）。教训：证明「源码自洽」的工装不能证明「符合外部
+     基准」，凡有外部参考目标的几何，都要有一件把目标本身也量一遍的工装。
+- **双卡两排「各少一格」：读 MIUI 电平而不是 AOSP 电平（第九轮补）**：用户报「单卡时底部满格，
+  双卡时上下两排都少一格」。根因在 `TrioState.levelOf` 原来取 `SignalStrength.getLevel()`
+  （AOSP 口径），而 MIUI 状态栏用的是 `getMiuiLevel()`。实机 `dumpsys telephony.registry` 直接给出
+  反证：Xiaomi 14 / 5G NR 下两张卡都是 **`miuiLevel = 4`、`level = 3`**（同一行里两个字段并存），
+  系统画四格满格，双排照 AOSP 口径取就矮一格。jadx 侧佐证 MIUI 自己的取法：
+  `work\jadx-out\sources\com\android\systemui\statusbar\connectivity\MobileSignalController.java:495`
+  = `miuiLevel = signalStrength2.getMiuiLevel();`。`getMiuiLevel()` 不在公开 SDK 里
+  （`javap` 查 SDK 37 的 `android.jar`，`android.telephony.SignalStrength` 只有 `public int getLevel();`），
+  所以新增 `TrioState.miuiLevel(SignalStrength)`：`Refl.callByName(strength, "getMiuiLevel")`，
+  非 Number 才退回 `strength.getLevel()`；0..4 之外的拒绝规则不变（MIUI 报 9 仍判 -1）。
+  离线验证：`work\simcheck\verify.ps1` 从两构建升为**三构建**，第三个反例把
+  `final int level = miuiLevel(strength);` 换回 `final int level = strength.getLevel();`（该正则必须
+  恰好命中 1 处，否则脚本自己 `throw`）—— 固定版 `exit 0`（**47 条**断言全 `[ok]`）、
+  「订阅号当槽位」版 `exit 1`（27 条不符）、「用 AOSP 电平」版 `exit 1`（**恰好 4 条**不符，且正是
+  那 4 条 MIUI 断言，分离度精确到条）。`gapcheck` / `slotcheck` / `dualsimcheck` / `overview` 复跑
+  全部 `exit 0`（`renderer = e96fd812ba2a…`）；`:app:assembleDebug` `BUILD SUCCESSFUL in 19s`，
+  `app-debug.apk` **33434594 B**、sha256 **`4A0738A03E92D0828B8257C6FC76652D1FA86D22589D6ED3BD405F58EBA4032C`**，
+  6 个 dex 里 `getMiuiLevel` / `miuiLevel` / `getLevel` 全部命中、`com/hyperduo` 零命中。
+  **尚未在真机上复验「双排两排都满格」**（当时设备不在线；`adb mdns services` 返回空）——
+  实机证据目前只有 `dumpsys` 那两个字段，没有装新 APK 后的截图。

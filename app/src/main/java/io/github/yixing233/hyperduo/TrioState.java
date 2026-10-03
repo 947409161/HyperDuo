@@ -1,6 +1,12 @@
-package com.hyperduo.trio;
+package io.github.yixing233.hyperduo;
 
+import android.content.Context;
 import android.content.res.Resources;
+import android.os.SystemClock;
+import android.telephony.SignalStrength;
+import android.telephony.SubscriptionInfo;
+import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyManager;
 import android.view.View;
 
 import java.lang.reflect.Field;
@@ -19,6 +25,11 @@ import java.util.List;
  * apply (see {@link #noteSignalIcon}). Those arrive as raw resource ids, which are
  * resolved to entry names once a host view — and therefore a {@code Resources} —
  * is available.
+ *
+ * <p>That path carries exactly one mobile level: {@code transformResId} is static
+ * and its arguments never name a SIM, so it can only ever describe whichever SIM
+ * MIUI is drawing. Reading one level <em>per</em> SIM therefore has to come from
+ * telephony directly — see {@link #sampleSimsIfDue()}.
  */
 final class TrioState {
 
@@ -49,6 +60,36 @@ final class TrioState {
      * module never has to know about that special case.
      */
     static volatile String sMobileType = "";
+
+    /** How many SIM slots the reading covers; SIM 1 and SIM 2. */
+    static final int SIM_SLOTS = 2;
+
+    /**
+     * Signal level per SIM <em>slot</em> — index 0 is SIM 1, index 1 is SIM 2 —
+     * or {@code -1} where that slot is empty or its level is unknown.
+     *
+     * <p>Only used by the dual-SIM reading; the single row keeps using the
+     * {@code transformResId} level above, which tracks the current data SIM.
+     *
+     * <p>Length is always {@link #SIM_SLOTS}, so the renderer can read it without
+     * a length check.
+     *
+     * <p>Starts at {@code -1} rather than the zero-filled default: {@code 0} is a
+     * real reading (a SIM with no service), and a fresh array must not look like
+     * "two SIMs, both readable" before telephony has answered once. Getting that
+     * wrong draws two grey rows instead of falling back to the single row.
+     */
+    static volatile int[] sSlotLevels = { -1, -1 };
+
+    /** The current default-data SIM's slot, or {@code -1} when it is unknown. */
+    static volatile int sDataSlot = -1;
+
+    /** Telephony app context, captured from the first hooked view. */
+    private static volatile Context sContext;
+    /** Next {@link SystemClock#elapsedRealtime} at which telephony may be polled. */
+    private static volatile long sSimsDueAt;
+    /** How often telephony is polled. Signal strength is not a per-frame value. */
+    private static final long SIMS_INTERVAL_MS = 2000L;
 
     /** Raw signal icon ids seen before a host existed, newest last. */
     private static final List<Integer> PENDING = new ArrayList<>();
@@ -102,6 +143,10 @@ final class TrioState {
     int mobileLevel = -1;
     boolean wifiPresent = true;
     String mobileType = "";
+    /** Per-SIM levels by slot; a fresh array each refresh, never mutated in place. */
+    int[] slotLevels = { -1, -1 };
+    /** How many of {@link #slotLevels} carry a reading. */
+    int sims;
 
     TrioState(View host) {
         this.host = host;
@@ -143,10 +188,191 @@ final class TrioState {
         darkIntensity = Refl.getFloat(fIntensity, host, darkIntensity);
 
         resolvePending(resourcesOf(host));
+
+        // One telephony poll is enough for every host, so it is rate-limited here
+        // rather than expressed as a background subscription no host owns. It runs
+        // before the levels are read so the frame that discovers a change is also
+        // the frame that draws it - no extra invalidation round is needed. Polled
+        // when the second row is wanted, when the out-of-ring reading needs a
+        // level per SIM, or when the icon chain has never answered and the data
+        // SIM's own reading is the only thing left to fall back on.
+        if (TrioConfig.get().dualSim || TrioConfig.appearance().stackedOut()
+                || mobileLevel < 0) {
+            sampleSimsIfDue();
+        }
+
         wifiLevel = sWifiLevel;
         mobileLevel = sMobileLevel;
         wifiPresent = sWifiPresent;
         mobileType = sMobileType;
+
+        final int[] slots = sSlotLevels;
+        slotLevels = new int[] { slots[0], slots[1] };
+        sims = (slots[0] >= 0 ? 1 : 0) + (slots[1] >= 0 ? 1 : 0);
+
+        // Single row, no answer from the icon chain: the row still means "the SIM
+        // that carries data", and the sampler resolved exactly which one that is.
+        if (mobileLevel < 0 && sDataSlot >= 0 && sDataSlot < SIM_SLOTS
+                && slots[sDataSlot] >= 0) {
+            mobileLevel = slots[sDataSlot];
+        }
+    }
+
+    // ------------------------------------------------------------- per-SIM level
+
+    /**
+     * Captures the context telephony needs, from a view the module already has.
+     *
+     * <p>SystemUI is {@code android.uid.systemui} with
+     * {@code READ_PRIVILEGED_PHONE_STATE}, and this module runs inside it, so the
+     * framework answers these calls without the module's own manifest asking for
+     * anything.
+     */
+    static void attachContext(Context context) {
+        if (context == null || sContext != null) {
+            return;
+        }
+        try {
+            final Context app = context.getApplicationContext();
+            sContext = (app != null) ? app : context;
+        } catch (Throwable ignored) {
+            // leave it null; the reading stays on the single-row fallback
+        }
+    }
+
+    /**
+     * Re-reads the per-SIM levels at most once every {@link #SIMS_INTERVAL_MS}.
+     *
+     * <p>Called from {@code refresh()}, which runs in {@code onDraw}: the guard
+     * is what keeps a per-frame call from becoming a per-frame IPC.
+     */
+    private static void sampleSimsIfDue() {
+        final long now = SystemClock.elapsedRealtime();
+        if (now < sSimsDueAt) {
+            return;
+        }
+        sSimsDueAt = now + SIMS_INTERVAL_MS;
+        sampleSims(sContext);
+    }
+
+    /**
+     * Re-reads the per-SIM levels right away, bypassing the frame-rate guard, and
+     * reports whether anything changed.
+     *
+     * <p>Called from the signal-icon hook, which is an event-driven refresh rather
+     * than a per-frame one, so the guard is not what protects that path. Repainting
+     * only on a real change is what keeps MIUI's own icon churn from becoming a
+     * repaint loop.
+     */
+    static boolean pollSimsNow() {
+        if (sContext == null) {
+            return false;
+        }
+        final int[] before = sSlotLevels;
+        final int beforeData = sDataSlot;
+        sampleSims(sContext);
+        final int[] after = sSlotLevels;
+        return beforeData != sDataSlot || before[0] != after[0] || before[1] != after[1];
+    }
+
+    /**
+     * Reads one signal level per SIM slot straight from telephony.
+     *
+     * <p>Why not the signal icons: {@code transformResId} is static and its
+     * arguments name neither a SIM nor a slot, so the icons cannot say which SIM
+     * a level belongs to. The framework can, and {@link SubscriptionInfo} is the
+     * one place that maps a subscription to its slot — resolved at run time
+     * rather than assumed, because the ids differ per device.
+     *
+     * <p>Every step is defensive: any missing permission, dead radio or absent
+     * subscription leaves the corresponding slot at {@code -1}, and the caller
+     * then falls back to a single row rather than drawing empty dots.
+     */
+    private static void sampleSims(Context context) {
+        if (context == null) {
+            return;
+        }
+        final int[] levels = { -1, -1 };
+        int dataSlot = -1;
+        try {
+            final SubscriptionManager subs =
+                    (SubscriptionManager) context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+            final TelephonyManager tel =
+                    (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+            if (subs == null || tel == null) {
+                return;
+            }
+            final int dataSubId = SubscriptionManager.getDefaultDataSubscriptionId();
+            final List<SubscriptionInfo> infos = subs.getActiveSubscriptionInfoList();
+            if (infos != null) {
+                for (int i = 0; i < infos.size(); i++) {
+                    final SubscriptionInfo info = infos.get(i);
+                    if (info == null) {
+                        continue;
+                    }
+                    final int subId = info.getSubscriptionId();
+                    final int slot = info.getSimSlotIndex();
+                    if (subId == dataSubId) {
+                        dataSlot = slot;
+                    }
+                    if (slot < 0 || slot >= SIM_SLOTS) {
+                        continue;
+                    }
+                    levels[slot] = levelOf(tel, subId);
+                }
+            }
+        } catch (Throwable ignored) {
+            // keep whatever the previous poll found
+        }
+        // Publish only once the whole reading is consistent, so a frame never
+        // pairs SIM 1's level with SIM 2's from a different poll.
+        sSlotLevels = levels;
+        sDataSlot = dataSlot;
+    }
+
+    /**
+     * The 0..4 level MIUI draws for one subscription, or {@code -1}.
+     *
+     * <p>Deliberately <em>not</em> AOSP's {@code SignalStrength.getLevel()}: MIUI
+     * labels its bars from its own level and the two disagree. A live Xiaomi 14 on
+     * 5G NR reported {@code level = 3} with {@code miuiLevel = 4} on both SIMs
+     * while the stock bar drew a full four bars, so a dual row fed by
+     * {@code getLevel()} sat one notch below the icon the single row matches.
+     */
+    private static int levelOf(TelephonyManager tel, int subId) {
+        try {
+            final TelephonyManager perSim = tel.createForSubscriptionId(subId);
+            if (perSim == null) {
+                return -1;
+            }
+            final SignalStrength strength = perSim.getSignalStrength();
+            if (strength == null) {
+                return -1;
+            }
+            final int level = miuiLevel(strength);
+            return (level < 0 || level > 4) ? -1 : level;
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    /**
+     * MIUI's own signal level, the one its status bar icon is chosen from, or
+     * AOSP's where MIUI does not provide it.
+     *
+     * <p>{@code SignalStrength.getMiuiLevel()} is a MIUI addition absent from the
+     * public SDK - even the SDK 37 {@code android.jar} has only
+     * {@code getLevel()} - so it is reached reflectively. MIUI's own
+     * {@code MobileSignalController.updateTelephony()} makes exactly this call to
+     * pick {@code stat_sys_signal_N}, which is why bare {@code getLevel()} can sit
+     * a notch below the icon on screen.
+     */
+    private static int miuiLevel(SignalStrength strength) {
+        final Object v = Refl.callByName(strength, "getMiuiLevel");
+        if (v instanceof Number) {
+            return ((Number) v).intValue();
+        }
+        return strength.getLevel();
     }
 
     private static Resources resourcesOf(View v) {

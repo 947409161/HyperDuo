@@ -1,4 +1,4 @@
-package com.hyperduo.trio;
+package io.github.yixing233.hyperduo;
 
 /**
  * The single source of truth for every setting shared between the settings app
@@ -35,7 +35,7 @@ public final class Prefs {
      * {@code io.github.libxposed.api}, which is {@code compileOnly} and so is
      * not on the app's runtime class path.
      */
-    public static final String ACTION_RELOAD = "com.hyperduo.trio.action.RELOAD";
+    public static final String ACTION_RELOAD = "io.github.yixing233.hyperduo.action.RELOAD";
 
     /**
      * Package the reload broadcast is addressed to. SystemUI registers the
@@ -83,6 +83,71 @@ public final class Prefs {
      * user gets.
      */
     public static final String KEY_VALUE_CENTRED = "swap_wifi_value";
+    /**
+     * Which of the three-in-one layouts is drawn: the ring arrangement or the
+     * rectangular one.
+     *
+     * <p>An {@code int} holding one of the {@code STYLE_*} constants below. Like
+     * every other key it keeps exactly one type for the whole lifetime of the
+     * module, so the value is only ever read back with {@code getInt}.
+     */
+    public static final String KEY_TRIO_STYLE = "trio_style";
+    /**
+     * Draws the mobile level as two rows of four dots - one SIM each - instead of
+     * the single row of the current data SIM.
+     *
+     * <p>Only honoured while there is no Wi-Fi ink and no charging bolt: with the
+     * arcs or the bolt on screen the glyph's top and bottom slots are taken, and
+     * the user asked for the two-SIM reading precisely as the alternative to
+     * those. The top row is SIM 1 (slot 0) and the bottom row SIM 2 (slot 1).
+     * With a single SIM, or while the per-SIM levels cannot be read, the single
+     * row stays and keeps showing the current data SIM.
+     *
+     * <p>A brand-new key with a brand-new name. The framework does no type
+     * conversion, so a key may only ever be read back with the type it was
+     * written with - see the note on {@link #KEY_MOBILE_TYPE_MODE}.
+     */
+    public static final String KEY_DUAL_SIM = "dual_sim_signal";
+    /**
+     * Where the mobile signal is drawn: inside the glyph, or as a status-bar view
+     * outside it.
+     *
+     * <p>An {@code int} holding one of the {@code SIGNAL_*} constants below.
+     * Outside the glyph the module stops drawing the level dots entirely and -
+     * depending on {@link #KEY_STACKED_SIGNAL} - either hands the native signal
+     * icon back or draws one of its own next to the battery.
+     *
+     * <p>A brand-new key with a brand-new name: the framework does no type
+     * conversion, so a key may only ever be read back with the type it was
+     * written with - see the note on {@link #KEY_MOBILE_TYPE_MODE}.
+     */
+    public static final String KEY_SIGNAL_MODE = "signal_mode";
+    /**
+     * Draws the out-of-ring signal as four ascending capsule bars for one SIM
+     * over four dots for the other, instead of leaving the native icon in place.
+     *
+     * <p>Only ever honoured while {@link #KEY_SIGNAL_MODE} is
+     * {@link #SIGNAL_OUT_RING}: inside the glyph the rings' own level dots are the
+     * signal, and there is nothing here for this switch to change. Turning it off
+     * outside the glyph is not "draw the default dots" but "let MIUI draw its own
+     * signal icon", which is what makes it a meaningful choice rather than a
+     * second way of saying the same thing.
+     *
+     * <p>A brand-new key with a brand-new name.
+     */
+    public static final String KEY_STACKED_SIGNAL = "stacked_signal";
+    /**
+     * Draws only the current data SIM's out-of-ring signal row, leaving the other
+     * SIM out entirely.
+     *
+     * <p>Gated on {@link #KEY_STACKED_SIGNAL} rather than on anything of its own:
+     * while the native icon is in place the module draws no signal at all, so
+     * there would be nothing for this to narrow. Being switched off by
+     * <em>another</em> row is fine; a row that switches itself off is not.
+     *
+     * <p>A brand-new key with a brand-new name.
+     */
+    public static final String KEY_DATA_SIM_ONLY = "data_sim_only";
 
     public static final String KEY_ROLE_COLORS = "role_colors";
     public static final String KEY_COLOR_CRITICAL_ON_DARK = "color_critical_on_dark";
@@ -154,6 +219,53 @@ public final class Prefs {
      */
     public static final boolean DEF_VALUE_CENTRED = false;
 
+    /** The original arrangement: a battery ring with the content inside it. */
+    public static final int STYLE_RING = 0;
+    /**
+     * The rectangular arrangement: a column of four level dots down each side,
+     * the network state in the top slot between them, an enlarged percentage
+     * below, and a full-width battery bar along the bottom. There is no ring.
+     */
+    public static final int STYLE_RECT = 1;
+    /**
+     * The ring, for every install that has never chosen.
+     *
+     * <p>Only the styles themselves are honoured: the settings screen offers no
+     * third entry, so an unrecognised stored value degrades to the ring rather
+     * than to a blank glyph.
+     */
+    public static final int DEF_TRIO_STYLE = STYLE_RING;
+
+    /** The signal is the glyph's own level dots, exactly as shipped. */
+    public static final int SIGNAL_IN_RING = 0;
+    /**
+     * The signal leaves the glyph and is drawn beside the battery instead.
+     *
+     * <p>What stands there depends on {@link #KEY_STACKED_SIGNAL}: off means
+     * MIUI's own signal icon keeps its place, on means the module draws the
+     * stacked bars-and-dots reading of its own.
+     */
+    public static final int SIGNAL_OUT_RING = 1;
+    /**
+     * Inside the glyph, for every install that has never chosen: the shipped look
+     * keeps the level dots in the ring's lower opening.
+     */
+    public static final int DEF_SIGNAL_MODE = SIGNAL_IN_RING;
+
+    /**
+     * Off by default: outside the glyph the shipped behaviour is to hand the
+     * signal back to MIUI rather than draw a second version of it.
+     */
+    public static final boolean DEF_STACKED_SIGNAL = false;
+    /** Off by default: the stacked reading shows both SIMs unless told otherwise. */
+    public static final boolean DEF_DATA_SIM_ONLY = false;
+
+    /**
+     * Off by default: the shipped look draws one row of dots for the current data
+     * SIM, and the second row is an opt-in reading for a dual-SIM device.
+     */
+    public static final boolean DEF_DUAL_SIM = false;
+
     public static final boolean DEF_ROLE_COLORS = true;
     public static final int DEF_COLOR_CRITICAL_ON_DARK = 0xFFFF3B30;
     public static final int DEF_COLOR_CRITICAL_ON_LIGHT = 0xFFFF3B30;
@@ -217,6 +329,12 @@ public final class Prefs {
 
     public static final int MIN_MOBILE_TYPE_MODE = MOBILE_TYPE_OFF;
     public static final int MAX_MOBILE_TYPE_MODE = MOBILE_TYPE_OUT_RING;
+
+    public static final int MIN_TRIO_STYLE = STYLE_RING;
+    public static final int MAX_TRIO_STYLE = STYLE_RECT;
+
+    public static final int MIN_SIGNAL_MODE = SIGNAL_IN_RING;
+    public static final int MAX_SIGNAL_MODE = SIGNAL_OUT_RING;
 
     static int clamp(int value, int min, int max) {
         return value < min ? min : (value > max ? max : value);
