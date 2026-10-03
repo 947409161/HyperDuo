@@ -794,9 +794,24 @@ int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `
 `data_sim_only` 打开时只取上网卡：`dataSlot` 命中哪张就取哪张，`dataSlot` 未知（`-1`）或那张卡
 没有读数时退回第一张有读数的卡，绝不退化成两张。
 
-**高度**：视图高度取锚点（电池图标盒）的高度，宽度由 `outSignalWidth(height, dots)` 按参考图
-纵横比算出 —— 有/无点行分别是 `STACK_INK_H` 与 `STACK_BAR_H[3]`，所以没有点行时不会在下方
-留一条空白。宿主尚未测量（`inkScale <= 0`）时跳过挂载，下一次 posted sync 自愈。
+**高度与尺寸**：视图高度是 `TrioRenderer.outSignalHeight(anchor.getHeight(),
+outSignalSize)` —— 锚点（电池图标盒）高度乘上用户设置的百分比（`out_signal_size`，100 = 与图标
+同高），再把结果交给 `outSignalWidth(height)` 按参考图纵横比求宽。**两个函数的参照框永远是
+`STACK_INK_H`（209）**，与有没有点行无关。
+
+**这里修掉过一个尺寸异常**：原先 `outSignalWidth(height, dots)` 的分母随 `dots` 在
+`STACK_INK_H`(209) 与 `STACK_BAR_H[3]`(150) 之间切换，而 `drawOutSignal` 里的
+`scale = Math.min(width/inkW, height/inkH)` 又用同一个较矮的框 —— 两处互相印证，谁都看不出错，
+结果**同一宿主高度下「无点行」的柱被放大 `209/150 ≈ 1.39` 倍**：单卡读数比双卡读数高出一大截，
+切到「仅显示上网卡」时视图还会跟着跳一下。现在参照框只有 209 一个：点行只是**内容**，不是**画框**，
+`outSignalInkH(dots)` 降级为「居中用的墨高」，不再参与比例。`work/outringcheck` 的 `squat` 反例
+把这两行同时改回旧写法，探针必须挂掉 —— 单独改一处是**看不见的**，这正是这个 bug 能活下来的原因。
+
+**改尺寸要不要重测**：`TrioHooks.outSignalHeight(View anchor)` 是唯一的换算入口，
+`updateOutSignal` 的 `measure(...)` 与 `refreshOutSignal` 的变更比较都用它，滑杆改值与重新测量
+不可能对目标高度各执一词；比较式因此是 `view.getMeasuredHeight() != outSignalHeight(anchor)`。
+
+宿主尚未测量（`inkScale <= 0`）时跳过挂载，下一次 posted sync 自愈。
 
 **挂载位置与生命周期**完全照抄环外类型标签那套（见「网络类型：环内与环外」）：挂在
 `batteryContainerOf(host)` 返回的 `MiuiStatusBatteryContainer` 上，同样的 posted-only
@@ -865,6 +880,7 @@ meter)`：有信号就贴在信号外侧，否则直接贴电池盒 —— 阅�
 | `value_weight` | `700` | 100 – 900 |
 | `type_size` | `32` | 16 – 44（只用于环内） |
 | `out_type_size` | `32` | 16 – 64（只用于环外；上界高于 `type_size`，见 `Prefs.java` 的说明） |
+| `out_signal_size` | `100` | 50 – 200（环外信号读数的百分比；100 = 与状态栏图标同高，只用于环外 + 堆叠信号） |
 | `type_weight` | `700` | 100 – 900（环内/环外共用） |
 | `track_alpha` | `56` | 0 – 255 |
 | `debug_log` | `false` | — |
@@ -994,14 +1010,25 @@ Wi-Fi 墨迹 / 充电 / 只读到一张卡 / 一张都没读到 / 开关关 / �
   2 种样式共 12 组，要求 `signal_mode=环内` 时「两个新开关都关」与「都开」的 720×720 渲染哈希**相等**。
 - `reading()` 查 `outSignalLevels` 的读数解析（两卡取槽序、单卡只画柱、`dataSimOnly` 命中上网卡、
   上网卡沉默时退回另一张已应答的卡等 11 组）。
-- `geometry()` 查参考图比例式（列数、柱高严格递增、`STACK_INK_W/H` 与 `STACK_BAR_H[3]+gap+D` 的关系）。
-- `pixels()` 在真实画布上验柱底共线、最高柱在最右、未点亮列既不透明也不与点亮列同色、点行在柱底下方。
+- `geometry()` 查参考图比例式（列数、柱高严格递增、`STACK_INK_W/H` 与 `STACK_BAR_H[3]+gap+D` 的关系），
+  并查**盒子始终按 `STACK_INK_H` 定比例**：`outSignalWidth(h)` 与 `h*STACK_INK_W/STACK_INK_H` 相等、
+  高度为 0 时宽度为 0，以及 `outSignalHeight` 的百分比语义（100 不变、50 折半、200 加倍、下限仍留
+  1 px、0 行/0% 都为 0）。
+- `pixels()` 在真实画布上验柱底共线、最高柱在最右、未点亮列既不透明也不与点亮列同色、点行在柱底下方，
+  以及**同一行上有无点行的最高柱一样高**（尺寸异常的回归断言）。
 
-两条反例构建都由 `[regex]::Replace` 从工作树文本生成：`refold` 把 `foldsMobile()` 尾上 `|| signalOutOfRing`
+三条反例构建都由 `[regex]::Replace` 从工作树文本生成：`refold` 把 `foldsMobile()` 尾上 `|| signalOutOfRing`
 （环外一律折叠，模拟「交还系统却把系统图标摘了」），`inert` 把 `signalDots()` 尾上 `&& !stackedSignal`
-（环内也被堆叠开关压住）。`fixed` 必须 `exit 0`，两条反例必须 `exit 1`（实测分别 3 条、14 条不符）。
+（环内也被堆叠开关压住），`squat` 同时改回 `drawOutSignal` 的 `scale` 与 `outSignalWidth` 两行的旧分母
+（只改一处是看不见的 —— 两处互相印证，正是尺寸异常能长期存活的原因）。`fixed` 必须 `exit 0`，
+三条反例必须 `exit 1`（实测分别 3 条、14 条、3 条不符；`squat` 实测最高柱 51 vs 72 px，即 1.39 倍本身）。
 脚本开头有一道**源码钉**：`TrioHooks.java` 里若已不存在 `if (a.foldsMobile())` 就直接 `throw`——
 否则探针会变成在测一条没人调用的规则。
+
+**为什么尺寸断言不能自己算取样列**：`squat` 第一次跑出来是「51 vs 0 px」，因为探针用**正确**的公式
+去算最高柱的横坐标，而那个构建的几何恰恰是错的，取样列整个落在柱外，量到的是空画布。断言「两边一样大」
+时，取样点必须与几何无关（取全画布最高的亮柱，`tallestRun`），否则一条本意是抓尺寸错的断言会退化成
+在抓「那里没东西」。
 
 **为什么断言「未点亮」要挑对列**：`pixels()` 最初在第一列取点验底纹，而三点读数下第一列的点是亮着的，
 于是那条断言恒假，看起来像产品缺陷。改成在**第四列**取样（三点的读数下第四列必暗）并补一条
@@ -1625,13 +1652,41 @@ SystemUI 进程会跑到它。它把真实的 `app\src\main\java\io\github\yixin
   **尚未在真机上复验「双排两排都满格」**（当时设备不在线；`adb mdns services` 返回空）——
   实机证据目前只有 `dumpsys` 那两个字段，没有装新 APK 后的截图。
 
+- **环外信号尺寸异常与「环外信号大小」（第十轮补）**：用户报「环外信号尺寸异常」并要求「增加环外
+  信号尺寸的调节功能」，并指出参考 `https://github.com/ColdP/HyperChanger`。新增 `out_signal_size`
+  （int 百分比，默认 100 = 与状态栏图标同高，范围 50 – 200），UI 是尺寸卡里的 `IntSlider`，
+  门禁 `a.stackedOut()`、提示指向 `master` / `show_mobile` / `signal_mode` / `stacked_signal`
+  四条上游开关（**不是**本行自己的结果，否则关掉就再也推不回来）。
+  **尺寸异常的真身**：`outSignalWidth(height, dots)` 的分母随点行在 209 / 150 之间切换，
+  `drawOutSignal` 的 `scale = min(width/inkW, height/inkH)` 又用同一个较矮的框 —— **两处互相印证**，
+  于是同一宿主高度下「无点行」（单卡、或开了「仅显示上网卡」）的柱被放大 `209/150 ≈ 1.39` 倍，
+  单卡读数比双卡高出一大截。修法是**参照框只留 209**：新增
+  `outSignalHeight(int anchorHeight, int percent)`（纯算术，`Math.max(1, round(h * percent/100f))`）、
+  `outSignalWidth` 收成单参、`drawOutSignal` 的 scale 固定除以 `STACK_INK_H`，`outSignalInkH(dots)`
+  降级为**居中用的墨高**。`TrioHooks.outSignalHeight(View anchor)` 是唯一的换算入口，
+  `measure` 与变更比较都用它。
+  借鉴来源：HyperChanger 的 `stacked_mobile_signal_scale` 是 **float** 且夹取 `0.1..3`，
+  应用方式是给容器打 `scaleX/scaleY`；本项目取 **int 百分比**以贴合「所有既有设置项都是 int +
+  `IntSlider`」的现状，且不缩放视图而是重算几何。
+  离线验证：`work\outringcheck\verify.ps1` 从三构建升为**四构建**，第三个反例 `squat` 把
+  `scale` 与 `outSignalWidth` **两行同时**改回旧分母（**只改一处看不见** —— 这正是该 bug 能长期
+  存活的原因），固定版 `exit 0`、三条反例分别 3 / 14 / 3 条不符而 `exit 1`；`squat` 实测最高柱
+  `51 vs 72 px`（约 1.39 倍本身）。既有四条工装复跑全部 `exit 0`。`:app:assembleDebug`
+  （`--offline`）`BUILD SUCCESSFUL in 28s`。
+  **探针自身的一条教训**：尺寸断言最初用**正确公式**去算取样列，而 `squat` 构建的几何恰恰是错的，
+  取样点整个落在柱外，量到空画布（`51 vs 0 px`）—— 断言「两边一样大」时取样点必须与几何无关
+  （改取全画布最长的亮柱 `tallestRun`），否则一条本意抓尺寸错的断言会退化成在抓「那里没东西」。
+
 - **1.4 发布（含包名更换 + 双卡/环外/按 MIUI 电平取格）**：第一次用「先提交干净、再跑 release.ps1」的流程走通（`release.ps1` 构建工作树但给 `HEAD` 打 tag，所以必须工作树干净）。提交 `a98053f` `release: 1.4, rename the package to io.github.yixing233.hyperduo`（30 files、4464 insertions / 1103 deletions）先 `git push origin main`（`release.ps1` 只推 tag、**不推分支**，必须单独推一次），再 `release.ps1 -Version 1.4 -NotesFile .tmp\modrepo\notes-1.4.md` → `exit 0`、`BUILD SUCCESSFUL in 14s`。tag `v1.4` 是指向提交 `a98053f68ffe076574053ae17ffdfda0fbe30cf9` 的 **annotated tag**（tag 对象 `058f6f54229c9807004cd7fecf9555dcdccee61a`，`git rev-parse "v1.4^{commit}"` 与 `HEAD` 一致；注意在 PowerShell 里 `^{commit}` 必须加引号，否则 `^{…}` 被当转义吃掉）。Release `HyperDuo 1.4` 非 draft / 非 prerelease（`published=2026-10-03T05:40:25Z`），asset `HyperDuo-1.4.apk` **3067544 B**。**发布产物按字节复核**：从 `https://github.com/yixing233/HyperDuo/releases/download/v1.4/HyperDuo-1.4.apk` 下载回来 SHA256 **`0B95AF03D704C3F52C7B015023F67EA3217C22299CD1AECDBB6ABC07D65BE527`** 与本地 `dist\HyperDuo-1.4.apk` 逐字相同。
 - **1.4 发布产物的离线核对**（无设备，上机验证仍缺）：`aapt2 dump badging` → `package: name='io.github.yixing233.hyperduo' versionCode='10400' versionName='1.4'`、targetSdk 36、ABI 四套；`apksigner verify --print-certs` → v2 方案 `true`、证书 `CN=HyperDuo, O=HyperDuo, C=CN`、SHA-256 `b4e3a12d…8c41f`（与设备上原装 APK 同一证书，所以除改名那一次外，同包名的后续版本仍可 `-r` 覆盖）。
 - **R8 每次构建字节都不同，但 1.4 这次只差一处**：用 `release.ps1 -DryRun` 重建一份后与已上传的那份对比，**85 个 zip 条目、CRC、时间戳全部相同、体积相同**，却有 339 字节不同、哈希不同。逐字节定位（`.tmp\apkcmp.py`）后锁定唯一差异在 `META-INF/version-control-info.textproto` —— AGP 把构建时的 git 版本写进了 APK：旧的写 `revision: "3743845…"`（改名前的提交），重建的写 `revision: "a98053f…"`（本次发布提交）。另外 4 段差异全在签名块与中央目录（签名覆盖了那个文件，所以连签名一起变）。**结论：重建的那份才是与 tag 一致的正确产物**，已用它覆盖模块仓 asset（`release-module.ps1 -Force` 重传；主仓是首发，无需 `-Force`）。两处 asset 与本地 `dist\HyperDuo-1.4.apk` 现在**三者同一哈希** `0B95AF03…BE527`。
 - **PS 5.1 读 BOM-less UTF-8 脚本会按 ANSI（本机 `gb2312`）解码，直接 `& .\release.ps1` 必然解析失败**（报 `Missing expression after ','`、`The string is missing the terminator` 等一串错，且错误里中文全是乱码 —— 这是判据）。`release.ps1` / `install.ps1` / `.tmp\modrepo\release-module.ps1` 都是 BOM-less UTF-8 且含中文，所以在这台机器的 Windows PowerShell 5.1 下只有两条路：装 pwsh 7，或 `[scriptblock]::Create([System.IO.File]::ReadAllText($p,[Text.Encoding]::UTF8))` 后调用（脚本内硬编码 `$Root`、不用 `$PSScriptRoot`/`$script:`，所以这样调用安全）。本次用后者，两个脚本都以 `exit 0` 跑完。**要长期可用，应给这三个脚本加 UTF-8 BOM**（未做，属本次范围外）。
 - **LSPosed 模块仓首发 release**：模块仓 `Xposed-Modules-Repo/io.github.yixing233.hyperduo` 按仓库规格发 tag `10400-1.4`、title `1.4`、body 取 `.tmp\modrepo\notes-1.4.md`（首行是「安装前必读」的包名更换说明），asset `HyperDuo-1.4.apk` 3067544 B；`README.md` 同步更新到 1.4（`PUT contents` 带旧 sha → 新 sha `fab6b22eb153025b808a3ead27db6a4a5abae4fc`、commit `cb10135`），`SUMMARY` 未动。驱动脚本 `.tmp\modrepo\release-module.ps1`（只走 Releases API，模块仓不克隆到本地；`maintain` 角色不能改仓库设置但**能发 release**，已实测 `POST /releases` → 201）。
-- **模块仓「已上线但未收录」的唯一门禁 = 仓库 description 为空**：抽样 `Xposed-Modules-Repo` 24 个仓库逐个探 `https://modules.lsposed.org/module/<pkg>/`，结果是「描述空 + 404」4 个（含本项目）、「描述空 + 已收录」**0** 个、「描述非空 + 已收录」20 个。所以 release 发了、README 有了也仍 404（`io.github.yixing233.hyperduo` → 404，对照 `io.github.kvmy666.duostatusbar` → 200）。而 **description 目前无法由 API 设置**：`PATCH /repos/Xposed-Modules-Repo/…` → 404 Not Found；GraphQL `updateRepository` → `FORBIDDEN: yixing233 does not have the correct permissions to execute 'UpdateRepository'`（尽管 GitHub 角色表上 maintain 本应有 `Edit a repository's description`，且同 token 的 `PUT …/topics` → 200，证明 token 与路由都正常）。⇒ **只能在 GitHub 网页的 About 面板手填**，文案已备：description `HyperDuo · 仿 iPhone Duo 三合一状态栏图标`（`.tmp\modrepo\desc.txt`）、homepage `https://github.com/yixing233/HyperDuo`（`.tmp\modrepo\homepage.txt`）。**本条是当前唯一未完成项。**
+- **模块仓「已上线但未收录」的唯一门禁 = 仓库 description 为空**：抽样 `Xposed-Modules-Repo` 24 个仓库逐个探 `https://modules.lsposed.org/module/<pkg>/`，结果是「描述空 + 404」4 个（含本项目）、「描述空 + 已收录」**0** 个、「描述非空 + 已收录」20 个。所以 release 发了、README 有了也仍 404（`io.github.yixing233.hyperduo` → 404，对照 `io.github.kvmy666.duostatusbar` → 200）。而 **description 目前无法由 API 设置**：`PATCH /repos/Xposed-Modules-Repo/…` → 404 Not Found；GraphQL `updateRepository` → `FORBIDDEN: yixing233 does not have the correct permissions to execute 'UpdateRepository'`（尽管 GitHub 角色表上 maintain 本应有 `Edit a repository's description`，且同 token 的 `PUT …/topics` → 200，证明 token 与路由都正常）。⇒ **只能在 GitHub 网页的 About 面板手填**，文案已备：description `HyperDuo · 仿 iPhone Duo 三合一状态栏图标`（`.tmp\modrepo\desc.txt`）、homepage `https://github.com/yixing233/HyperDuo`（`.tmp\modrepo\homepage.txt`）。**（这一项后来已由用户手填完成并成功收录，见本节末尾。）**
 
 - **模块仓 README 补预览图（1.4 之后）**：模块仓 `Xposed-Modules-Repo/io.github.yixing233.hyperduo` 的 `README.md` 原先只有纯文字，已在三处插入 `<img>`（用 HTML 标签而非 Markdown 语法，就是为了显式控制 `width`）：第 5 行标题下 `statusbar.png`（`width="900"`，真实状态栏字形）、第 48 行新增 `## 效果预览` 一节插 `states.png`（`width="820"`，六种状态）、第 70 行 `## 设置` 一节插 `settings.png`（`width="420"`，设置界面整屏）。图片**不落在模块仓里**，而是引用主仓的图：`https://cdn.jsdelivr.net/gh/yixing233/HyperDuo@main/docs/images/<name>.png` —— 模块仓按规格只放 `README.md` + `SUMMARY` 两个文件（`git clone --depth 1` 复核确认仍只有这两个），所以图片只能外链；选 jsDelivr 而非 `raw.githubusercontent.com` 是因为对照仓 `io.github.kvmy666.duostatusbar` 的已上线 README 用的就是 jsDelivr，且 jsDelivr 自带 CDN 与 `@main` 缓存语义。
 - **外链可达性与字节一致性已实测**：`raw.githubusercontent.com` 与 `cdn.jsdelivr.net` 两条路对 `docs/images/` 下三张图都是 HTTP 200 且 **SHA256 与工作树逐字相同**（`statusbar.png` 155272 B / 4800×384、`states.png` 37408 B / 1124×405、`settings.png` 131178 B / 1200×1780；三张图 git 内已跟踪且工作树无改动）。GitHub 侧的渲染也用 `Accept: application/vnd.github.html+json` 拉 `readme` 端点验证过：三个 `<img>` 都正常生成（GitHub 把它们经 camo 代理，`data-canonical-src` 仍是我们的 jsDelivr URL），说明语法与地址都没问题。写入用 `PUT /repos/Xposed-Modules-Repo/io.github.yixing233.hyperduo/contents/README.md`（带旧 sha `fab6b22eb153025b808a3ead27db6a4a5abae4fc`）→ 新 sha `00ccd134494a60e6ba89a1aa4f022e98cb92fbc9`、commit `1a43a3f`；拉回来与本地暂存件逐字比对为 `True`（11004 B）。`SUMMARY` 未动（模块仓首页摘要仍是不含图片的一小段）。
 - **description / homepage 已由用户手填完成**（这是上一节留下的唯一阻塞项）：`GET /repos/Xposed-Modules-Repo/io.github.yixing233.hyperduo` 现在返回 `description = 'HyperDuo · 仿 iPhone Duo 三合一状态栏图标'`、`homepage = 'https://github.com/yixing233/HyperDuo'`、`topics = lsposed, statusbar, xposed`。**但模块页此时仍是 404**（`https://modules.lsposed.org/module/io.github.yixing233.hyperduo/` → 404，对照 `io.github.kvmy666.duostatusbar` → 200）——按仓库说明，收录要等上游 Cloudflare Pages 重新构建（说明写的是 5–15 分钟），**所以「填了 description 就立刻 200」并不成立，需要按时间复验**。
+- **模块页已收录（description 手填后约 23 分钟）**：`https://modules.lsposed.org/module/io.github.yixing233.hyperduo/` 在 **14:14:43** 由 404 转为 **200**（后台轮询 60 s 一次，`?cb=`/`Cache-Control: no-cache` 都不能提前穿透缓存，只有上游重新构建才生效；description 手填时刻约 05:51:27Z，即上游站点约 23 分钟后才重建）。**判据不能只看详情页 404**：同一时刻站点首页 `https://modules.lsposed.org/` 的 `astro-island` props 里已经出现本模块（`"name":"io.github.yixing233.hyperduo"`、`description` 为手填的那串、`url` 指模块仓，列表行 `<h2>` 显示手填 description、`Website` 指主仓、`Source` 指模块仓、`<time dateTime="2026-10-03T05:58:49Z">`），所以**「首页已列出、详情页还 404」是重建过程中的中间态**，等待期间不要据此判定失败。
+- 收录后的详情页（36628 B）核验：`<title>` = `HyperDuo · 仿 iPhone Duo 三合一状态栏图标 · Xposed Module Repository`；README 的三个 `<img>` 全部渲染出来，`data-canonical-src` 仍是我们的 jsDelivr 地址（`statusbar.png` width 900 / `states.png` width 820 / `settings.png` width 420）；下载链接是 `download/10400-1.4/HyperDuo-1.4.apk?sign=…`，即模块仓那个 release。
+- 工具坑：详情页直连偶发 `000`（curl 超时/连接失败），**必须 `curl.exe -sL` 跟随重定向并加重试**，否则会把网络抖动误判成 404（无斜杠的 `.../hyperduo` 返回 `308`，`-L` 才能跟到 200）。
