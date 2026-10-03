@@ -1,4 +1,4 @@
-# 本地发布：构建 release APK 并直接上传到 GitHub Release。
+﻿# 本地发布：构建 release APK 并直接上传到 GitHub Release。
 #
 # 用法：
 #   .\release.ps1 -Version 1.1
