@@ -571,18 +571,28 @@ Wi-Fi 搬进缺口仍是 canvas 变换（`translate` + `scale`）完成的，几
 文本/字号需要变时**只排队一次 posted sync**（`setText`/`setTextSize` 会 re-measure → 调度布局，
 同样不能在 `onLayout` 内做），否则只更新颜色与位置。
 
-字号用 `setTextSize(TypedValue.COMPLEX_UNIT_PX, a.outTypeSize)`：**必须显式
-`COMPLEX_UNIT_PX`**，单参 `setTextSize(float)` 默认按 SP 解释，而这里存的是裸 px。**环外字号
-不再乘 `inkScale`**：它是一个独立键 `out_type_size`（默认 32，与 `type_size` 同值，
-见 `Prefs.KEY_OUT_TYPE_SIZE`），含义是「宿主 20dp 图标盒子里的像素」，乘上画布缩放反而会
-把两种排布的字号绑在一起。字重取 `a.typeWeight`（`TrioRenderer.typefaceFor`），与环内共用。
+字号用 `setTextSize(TypedValue.COMPLEX_UNIT_PX, outTypeSizePx(container))`：**必须显式
+`COMPLEX_UNIT_PX`**，单参 `setTextSize(float)` 默认按 SP 解释，而这里传的已经是换算好的 px。
+**环外字号不再乘 `inkScale`**：它是一个独立键 `out_type_size_dp`（默认 11dp，见
+`Prefs.KEY_OUT_TYPE_SIZE_DP`），含义是「宿主 20dp 图标盒子里的大小」，乘上画布缩放反而会
+把两种排布的字号绑在一起；dp→px 的换算走 `outTypeSizePx`（posted 更新与 layout-pass 的变更
+比较都过它，滑杆改值与重测不可能各执一词，与 `outSignalHeight` 同一模式）。
+字重取 `a.typeWeight`（`TrioRenderer.typefaceFor`），与环内共用。
 宿主尚未测量（`inkScale <= 0`）时跳过挂载，下一次 posted sync 自愈。文本为空时置 `GONE`
 而非移除 —— 网络类型随 modem 来去，每次布局 add/remove 太吵。
 
-`type_size` 只作用环内，`out_type_size` 只作用环外，二者**不再共用**；`type_weight` 是两者
+`type_size` 只作用环内，`out_type_size_dp` 只作用环外，二者**不再共用**；`type_weight` 是两者
 共用的。设置页的门禁因此是 `a.typeInRing` / `a.typeOutOfRing` / `a.typeAnywhere()`，不再是
-裸的 `mobileTypeMode == X` 比较。`show_mobile_type` 是废弃的旧布尔键，仅用于迁移读取
-（见配置项参考）。
+裸的 `mobileTypeMode == X` 比较。`show_mobile_type` 是废弃的旧布尔键，`out_type_size` 是
+废弃的旧像素键，均仅用于迁移读取（见配置项参考）。
+
+**`out_type_size` → `out_type_size_dp`（第十二轮）**：旧键存的是**裸像素**，同一个滑杆值在
+不同密度设备上物理大小不同——这正是第十轮把 `out_signal_size` 从百分比改成 dp 时修掉的同一个
+缺陷，环外字号漏掉了。新键默认 11dp（= 32px ÷ 3，老默认在编写它的 density-3 设备上的物理
+大小），范围 6–22dp（覆盖旧范围 16–64px 在同设备上的物理跨度 5.3–21.3dp）。迁移走
+`readMobileTypeMode` 的既有模式：新键在则用新键；仅旧键在则 `Math.round(px ÷ density)` 一次
+并 clamp 进新范围；都没有则取新默认。旧键从此不再写入。九项离线断言
+（`.tmp/migtest/MigTest`，不含库）逐项覆盖了这几条路径。
 
 **结尾 A 的缩小（`type_suffix_scale`）**：参考图 `docs/ref-5ga.png` 量出 A 高 / 主字高 ≈
 56/86 ≈ 0.65，底边与主字底边近似齐平（差 2px），所以默认 65。这个比例是**标签本身的属性**，
@@ -653,7 +663,7 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 **环外类型** / **环外信号**。后两格是例外：环外标签与环外读数都不由渲染器绘制
 （见「网络类型：环内与环外」与「环外信号」），所以走
 `TrioPreviewView.setOutTypeOnly(true)` / `setOutSignalOnly(true)` 自己画。标签那格必须与
-`TrioHooks.updateOutTypeLabel` 同口径——字号取 `outTypeSize`、字重取 `typeWeight`、按 px 而非 sp，
+`TrioHooks.outTypeSizePx` 同口径——字号取 `out_type_size_dp` 乘密度、字重取 `typeWeight`、按 px 而非 sp，
 再把宿主 20dp 图标盒按预览自身的高度等比换算（`HOST_ICON_HEIGHT_DP = 20f`，与 `docs` 里
 `status_bar_icon_height` 一致），结尾 A 的缩放取 `type_suffix_scale`。`out_type_size` 在设置页
 别处**没有任何可见反馈**，这一格就是它的唯一所见即所得参照；口径一旦和钩子侧不一致，预览就
@@ -661,6 +671,12 @@ sRGB 亮度判断，三组角色色各有深/浅两套。前景 tint 自身仍�
 读数尺寸，再把 `out_signal_margin_dp` 换算成读数到格子右边缘的距离（右边缘即电池在真实那一行里
 的位置；窗口宽 = 读数 + 滑块能给出的最大间距），所以拉大间距时读数确实向左离开边缘，整个量程都
 留在格内。
+
+**类型边距的可见反馈（第十二轮补）**：两条边距在这格里的画法是「文字块在两条细刻度线**之间**
+居中」——刻度线各距格子边缘一条边距的宽度（按 20dp 图标盒等比），前景色 56/255 的透明度，与底纹
+同级的「结构感」。状态栏里边距的语义就是「原生图标让出来的空隙」，在这格里邻居就是格子边缘，
+所以加宽某一条边距时，刻度线外移、文字块整体被挤向另一侧——所见即所得地展示了「占位」而非
+「位移」。两边相等时文字块恰好在格子正中，与旧版渲染逐像素一致。
 
 `PREVIEW_SIZE = 39.dp` 是为了让八格一行放得下（8×39 + 7×4 = 340dp < 344dp）。第 7 格用了
 `"5GA"` 作为示例类型——正是为了让 `type_suffix_scale` 有可见反馈。
@@ -1004,7 +1020,7 @@ int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `
 | `value_size` | `36` | 16 – 44 |
 | `value_weight` | `700` | 100 – 900 |
 | `type_size` | `32` | 16 – 44（只用于环内） |
-| `out_type_size` | `32` | 16 – 64（只用于环外；上界高于 `type_size`，见 `Prefs.java` 的说明） |
+| `out_type_size_dp` | `11` | 6 – 22（只用于环外；dp，消费端乘密度成像素。取代裸像素键 `out_type_size`（默认 32、范围 16–64），旧值在读取时按 `px ÷ density` 迁移一次，旧键从此不再写入） |
 | `type_suffix_scale` | `65` | 50 – 100（结尾为 A 的类型如 5GA，末尾 A 相对主字号的百分比；环内分段绘制、环外用 `RelativeSizeSpan`，两处共用同一个键） |
 | `out_type_margin_left_dp` | `2` | 0 – 16（环外标签与其**外侧**的空隙，dp；RTL 下随整行镜像） |
 | `out_type_margin_right_dp` | `2` | 0 – 16（环外标签与其**内侧**的空隙，dp；RTL 下同样镜像） |

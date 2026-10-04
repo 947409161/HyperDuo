@@ -10,6 +10,7 @@
     <string name="group_stroke">描边</string>
     <string name="group_text">文字</string>
     <string name="group_type">网络类型</string>
+    <string name="group_out_signal">环外信号</string>
     <string name="group_track">底纹</string>
 
     <string name="tab_general">常规</string>
@@ -91,7 +92,7 @@
     <string name="arc_stroke_summary_rect">Wi-Fi 弧线的描边宽度，同时决定这组弧线在顶部槽位里的纵向位置。</string>
 
     <string name="value_size_title">数字字号</string>
-    <string name="value_size_summary">电量百分比文字的尺寸。</string>
+    <string name="value_size_summary">电量百分比文字的尺寸。注意「电量数字居中」打开时，居中的数字最大放大到原值的 1.4 倍，38 及以上不再变大（缺口里的数字仍按原值）。</string>
 
     <string name="value_weight_title">数字字重</string>
     <string name="value_weight_summary">电量数字的笔画粗细，100 最细、900 最粗。</string>
@@ -100,7 +101,7 @@
     <string name="type_size_summary">圆环中间 3G/4G/5G 等文字的大小。</string>
 
     <string name="out_type_size_title">环外网络类型字号</string>
-    <string name="out_type_size_summary">状态栏中环外 3G/4G/5G 等文字的大小。这个标签由系统状态栏绘制，设置页里的预览格是它唯一的所见即所得参照。</string>
+    <string name="out_type_size_summary">状态栏中环外 3G/4G/5G 等文字的大小，单位为 dp（会随屏幕密度自动换算成像素），可调范围 6–22dp。这个标签由系统状态栏绘制，设置页里的预览格是它唯一的所见即所得参照。</string>
 
     <string name="out_type_margin_left_title">环外类型左边距</string>
     <string name="out_type_margin_left_summary">环外网络类型标签与其外侧（背对电池的一侧）之间的空隙，单位为 dp。默认 2dp，可调范围 0–16dp。RTL 语言下整行镜像，这条边距会跟着翻到另一侧。</string>

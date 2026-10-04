@@ -53,6 +53,14 @@ public final class TrioPreviewView extends View {
      */
     private static final float HOST_ICON_HEIGHT_DP = 20f;
 
+    /**
+     * Alpha of the two margin rules in the out-of-ring type cell, on 0..255.
+     * Structure rather than ink, the same role the glyph's own track plays -
+     * visible against the dark preview background, gone if it competed with
+     * the label itself.
+     */
+    private static final int TRACK_RULE_ALPHA = 56;
+
     public TrioPreviewView(Context context) {
         super(context);
     }
@@ -192,14 +200,15 @@ public final class TrioPreviewView extends View {
     /**
      * Draws the out-of-ring label on its own, centred in the glyph box.
      *
-     * <p>The size is taken the way {@code TrioHooks.updateOutTypeLabel} takes
-     * it: {@code outTypeSize} raw pixels, no density scaling and no SP, with the
+     * <p>The size is taken the way {@code TrioHooks.outTypeSizePx} takes it: the
+     * {@code outTypeSize} dp resolved against the display density, with the
      * weight from {@code typeWeight}. Those pixels only mean something against
      * the icon box they are measured in, so the label is scaled by the ratio of
      * this preview's box to {@link #HOST_ICON_HEIGHT_DP}.
      */
     private void drawOutTypeLabel(Canvas canvas, int innerW, int innerH) {
-        final float hostHeight = HOST_ICON_HEIGHT_DP * getResources().getDisplayMetrics().density;
+        final float density = getResources().getDisplayMetrics().density;
+        final float hostHeight = HOST_ICON_HEIGHT_DP * density;
         if (mobileType.isEmpty() || hostHeight <= 0f) {
             return;
         }
@@ -209,7 +218,9 @@ public final class TrioPreviewView extends View {
         labelPaint.setTypeface(TrioRenderer.typefaceFor(a.typeWeight));
         labelPaint.setTextAlign(Paint.Align.CENTER);
         labelPaint.setTextScaleX(1f);
-        final float size = innerH * a.outTypeSize / hostHeight;
+        // dp setting to px exactly as the hooked side resolves it, then scaled
+        // by this preview's box over the icon box it is tuned against.
+        final float size = innerH * a.outTypeSize * density / hostHeight;
         labelPaint.setTextSize(size);
 
         // Shrink the trailing "A" the way the status bar label does, and the way
@@ -233,20 +244,42 @@ public final class TrioPreviewView extends View {
 
         final Paint.FontMetrics metrics = labelPaint.getFontMetrics();
         final float baseline = innerH * 0.5f - (metrics.ascent + metrics.descent) * 0.5f;
-        // One centred block: the label's own centre stays put while the suffix
-        // hangs smaller off its right. Centred on the *scaled* width, because
-        // setTextScaleX scales the advances the runs are placed by.
+        // The label is placed as the status bar places it: one gap to the anchor
+        // (the inward margin), one to the native icons (the outward margin). In
+        // this cell those neighbours are the cell edges, so the text block is
+        // centred in the room *between* the two margin rules rather than in the
+        // whole cell - a one-sided margin then visibly shifts the label instead
+        // of only moving a rule. With equal margins this is the plain centre.
+        final float pxPerDp = innerH / HOST_ICON_HEIGHT_DP;
+        final float roomLeft = a.outTypeMarginLeft * pxPerDp;
+        final float roomRight = innerW - a.outTypeMarginRight * pxPerDp;
         final float scaledWidth = width * scaleX;
-        float left = innerW * 0.5f - scaledWidth * 0.5f;
+        final float left = (roomRight > roomLeft)
+                ? roomLeft + (roomRight - roomLeft - scaledWidth) * 0.5f
+                : innerW * 0.5f - scaledWidth * 0.5f;
         labelPaint.setTextSize(size);
         labelPaint.setTextAlign(Paint.Align.LEFT);
         canvas.drawText(base, left, baseline, labelPaint);
         if (shrunk) {
-            left += baseWidth * scaleX;
             labelPaint.setTextSize(suffixSize);
-            canvas.drawText(suffix, left, baseline, labelPaint);
+            canvas.drawText(TrioGeometry.TYPE_SUFFIX + "", left + baseWidth * scaleX,
+                    baseline, labelPaint);
         }
         labelPaint.setTextAlign(Paint.Align.CENTER);
+
+        // The two margins, drawn as the reserved gaps they are: thin rules one
+        // margin's width in from each end, on the label's mid-line. In the
+        // status bar these lengths are padding the native icon row gives up, so
+        // the honest picture of a wider margin is "the neighbours moved out" -
+        // and the neighbours in this cell are the cell edges. The rules share
+        // the foreground at reduced alpha, the way the glyph's own track reads
+        // as structure rather than ink.
+        final float midY = innerH * 0.5f;
+        labelPaint.setColor((foreground & 0x00FFFFFF) | (TRACK_RULE_ALPHA << 24));
+        labelPaint.setStrokeWidth(Math.max(1f, innerH / 40f));
+        canvas.drawLine(roomLeft, midY, roomLeft, midY + innerH * 0.3f, labelPaint);
+        canvas.drawLine(roomRight, midY, roomRight, midY + innerH * 0.3f, labelPaint);
+        labelPaint.setColor(foreground);
     }
 
     /**

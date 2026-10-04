@@ -1840,7 +1840,10 @@ final class TrioHooks {
         if (label.getVisibility() != View.VISIBLE
                 || !text.contentEquals(label.getText())
                 || label.suffixScale != TrioConfig.appearance().typeSuffixScale
-                || label.getTextSize() != TrioConfig.get().outTypeSize) {
+                // The stored setting is a dp; the label's text size is the px it
+                // resolves to, so compare through the same conversion the posted
+                // path applies rather than raw against raw.
+                || label.getTextSize() != outTypeSizePx(container)) {
             requestOutTypeSync(container);
             return;
         }
@@ -2038,12 +2041,16 @@ final class TrioHooks {
         }
         // Its own setting, not the in-ring type_size: that one is authored for
         // the ring canvas' 120x120 design space and comes out far too small
-        // once the label stands in the status bar's real pixel space.
-        final float size = a.outTypeSize;
+        // once the label stands in the status bar's real pixel space. The
+        // setting is a dp (the retired key was raw pixels, which made one slider
+        // value a different physical size on every density), so the pixels it
+        // resolves to follow the display here.
+        final float size = outTypeSizePx(container);
         if (label.getTextSize() != size) {
             // PX, not the SP that the one-argument overload would use: the
-            // status bar lays out in raw pixels, so the value is applied as-is
-            // rather than scaled by the user's font-size setting.
+            // status bar lays out in raw pixels, and the dp has already been
+            // resolved by hand rather than being scaled by the user's
+            // font-size setting.
             label.setTextSize(TypedValue.COMPLEX_UNIT_PX, size);
         }
         final Typeface typeface = TrioRenderer.typefaceFor(a.typeWeight);
@@ -2230,6 +2237,21 @@ final class TrioHooks {
     private static int outSignalMargin(View container) {
         final float density = container.getResources().getDisplayMetrics().density;
         return Math.round(TrioConfig.appearance().outSignalMargin * density);
+    }
+
+    /**
+     * The out-of-ring label's font size in pixels, after the dp setting.
+     *
+     * <p>Both the posted update and the layout-pass change check go through
+     * here, so a slider move and a re-measure can never disagree about the
+     * target - the same pattern {@link #outSignalHeight} uses for the reading.
+     * The px that one slider value lands on now follows the display, which is
+     * the whole point of the dp key: the retired raw-pixel key made the same
+     * value a different physical size on every density.
+     */
+    private static float outTypeSizePx(View container) {
+        final float density = container.getResources().getDisplayMetrics().density;
+        return TrioConfig.appearance().outTypeSize * density;
     }
 
     /**

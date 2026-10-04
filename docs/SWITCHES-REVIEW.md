@@ -40,7 +40,7 @@
 | 弧线粗细 | `arc_stroke` | `:757-765` | `:337`(矩形位移)、`:482`、`:497` | 仅日志 `:346` |
 | 数字字号 / 字重 | `value_size` / `value_weight` | `:766-774` / `:779-793` | `:371/561`、`:372/566` | 不读 |
 | 圆环内类型字号 | `type_size` | `:805-815` | `:360`、`:583`、`:599` | 不读 |
-| 环外字号 | `out_type_size` | `:823-836` | 不读 | `:1801`、`:1939-1944` |
+| 环外字号 | `out_type_size_dp` | 第十二轮（1.6.2 起；取代裸像素键 `out_type_size`） | 不读 | `outTypeSizePx`（环外标签用它） |
 | 5GA 中 A 的比例 | `type_suffix_scale` | 第十一轮（见 6.9） | `:368`（矩形）、`:783`、`:799`（环内分段绘制） | `:2031`（环外 `RelativeSizeSpan`）|
 | 环外类型左边距 | `out_type_margin_left_dp` | 第十一轮 | 不读 | `placeOutTypeLabel` / `reserveOutRingStrip` |
 | 环外类型右边距 | `out_type_margin_right_dp` | 第十一轮 | 不读 | 同上 |
@@ -477,4 +477,14 @@ final float scale = Math.min(width / inkW, height / outSignalInkH(dotRow));
 - **根因**：位置偏移不参与 `reserveOutRingStrip` 的占位计算，所以它能把读数移出预留区、叠到邻居图标上。边距之所以没这个问题，正因为它是被预留的那个数字。
 - **键的迁移**：`out_signal_offset_x_dp` / `out_signal_offset_y_dp` **不迁移**到新键。理由有二：偏移的语义（自由移动）与边距（占位间隙）不同，无法一一映射；且这两个键只在 1.6 存在了一天、默认值为 `0`，绝大多数安装从未写过它们。装了 1.6 又恰好调过偏移的用户，升级后回到默认间距 `2dp`（= 1.6 之前的出厂外观），不会更差。
 - **默认值取 2dp 而非 0**：老 `OUT_LABEL_GAP_DP` 常量、以及 1.6 之前所有版本的读数间距都是 2dp，取 0 会让升级后读数贴到电池上，是外观回退。
+
+### 6.11 第十二轮：尺寸调节的复盘（1.6.2）
+
+对全部 13 条尺寸滑杆做了一次盘点后落地四项。总体判断：1.6.1 之后这套设计的**骨架是对的**（环外一切横向调节都走占位边距、门禁全部派生自 `TrioAppearance`、新键默认等于旧硬编码值），残留的问题集中在一个单位例外、两个预览盲区、一处卡片混杂。
+
+- **P1 环外字号转 dp（`out_type_size` → `out_type_size_dp`）**：旧键是全表**唯一**的非 dp 长度（裸 px，`COMPLEX_UNIT_PX` 原样应用），同一个滑杆值在不同密度设备上物理大小不同——与第十轮 `out_signal_size` 改 dp 的理由完全同源，是那条修复漏掉的一处。新键默认 **11dp**（= 老默认 32px ÷ 编写它的 density-3 设备的密度，物理外观不变），范围 **6–22dp**（覆盖旧范围在同密度上的物理跨度）。**迁移**走 `readMobileTypeMode` 的既有模式（新键在则用之；仅旧键在则 `Math.round(px ÷ density)` 一次并 clamp；`from(SharedPreferences)` 为此增开带 `density` 的重载，无显示环境的工装走 `Prefs.AUTHORED_DENSITY = 3f` 委托旧签名）；**九项离线断言**（`.tmp/migtest/MigTest`）覆盖全部路径。消费端换算收口在 `TrioHooks.outTypeSizePx`（posted 更新与变更比较共用，同 `outSignalHeight` 模式），`TrioPreviewView` 同口径乘密度。
+- **P2 预览补类型边距的可见反馈**：`drawOutTypeLabel` 在格子两侧按边距宽度画细刻度线（前景 56/255，与底纹同级的结构感），**文字块在两线之间居中**——加宽某一边时文字块被挤向另一侧，展示的是「占位」而非「位移」，与状态栏的真实语义一致。两边相等时与旧版渲染逐像素一致。至此 13 条滑杆全部有可见反馈。
+- **P3 卡片拆分**：`group_type` 原来一张卡 8 条滑杆，混了「网络类型」与「环外信号」两个对象、两套门禁。拆成两张卡（新增 `group_out_signal` 小节标题）：信号大小与间距门禁是 `a.stackedOut()`，类型组门禁是 `typeOutOfRing`/`typeAnywhere()`，混排时用户找「信号间距」要在类型堆里翻。
+- **P5/P6 文案与单位**：`out_type_size` 的 summary 补上单位与范围（此前全表唯一不提单位的长度滑杆）；`value_size` 的 summary 说明「居中模式下数字最大放大 1.4 倍、38 及以上不再变大」（`centreSize = min(size×1.4, 52)` 的既有死区，此前无解释）；`IntSlider` 增 `valueTextSuffix`，五条 dp 滑杆的值显示从裸数字变为「12dp」。
+- **未动**：`out_type_margin_left/right` 的「左/右」命名（首轮用户在选择题里定过「左右分开、两个独立滑杆」的硬约束，RTL 镜像已在 summary 说明）；strip 预留模型；`type_weight`/`value_weight` 分立。
 

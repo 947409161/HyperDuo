@@ -10,6 +10,7 @@
     <string name="group_stroke">Stroke</string>
     <string name="group_text">Text</string>
     <string name="group_type">Network type</string>
+    <string name="group_out_signal">Out-of-ring signal</string>
     <string name="group_track">Track</string>
 
     <string name="tab_general">General</string>
@@ -91,7 +92,7 @@
     <string name="arc_stroke_summary_rect">Stroke width of the Wi-Fi arcs, and the vertical position of the group inside the top slot.</string>
 
     <string name="value_size_title">Number size</string>
-    <string name="value_size_summary">Font size of the battery percentage.</string>
+    <string name="value_size_summary">Font size of the battery percentage. While the percentage is centred it is enlarged at most 1.4x, so 38 and above no longer grow (the number in the notch still follows this setting).</string>
 
     <string name="value_weight_title">Number weight</string>
     <string name="value_weight_summary">Stroke weight of the battery number, 100 lightest to 900 heaviest.</string>
@@ -100,7 +101,7 @@
     <string name="type_size_summary">Font size of the 3G/4G/5G label in the ring centre.</string>
 
     <string name="out_type_size_title">Out-of-ring type size</string>
-    <string name="out_type_size_summary">Font size of the 3G/4G/5G label shown outside the ring, in the status bar. That label is drawn by the status bar itself, so the matching preview cell here is the only place its size is visible.</string>
+    <string name="out_type_size_summary">Font size of the 3G/4G/5G label shown outside the ring, in the status bar, in dp so it converts itself to pixels on any screen density; the slider covers 6–22dp. That label is drawn by the status bar itself, so the matching preview cell here is the only place its size is visible.</string>
 
     <string name="out_type_margin_left_title">Out-of-ring type margin, left</string>
     <string name="out_type_margin_left_summary">The gap between the out-of-ring network type label and its outer side - the one facing away from the battery - in dp. The default is 2dp and the slider covers 0–16dp. Under an RTL language the whole row mirrors and this margin moves to the other side with it.</string>

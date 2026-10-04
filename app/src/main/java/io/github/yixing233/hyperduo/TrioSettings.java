@@ -187,8 +187,26 @@ public final class TrioSettings {
     /**
      * Reads every key, falling back to the shared defaults. Numeric keys are
      * clamped here rather than at draw time so the renderer can trust them.
+     *
+     * <p>Same as {@link #from(SharedPreferences, float)} at the density the
+     * retired raw-pixel keys were authored on. Kept for callers that have no
+     * display to ask - the workbench stubs - which never hold a migrated value
+     * anyway.
      */
     public static TrioSettings from(SharedPreferences p) {
+        return from(p, Prefs.AUTHORED_DENSITY);
+    }
+
+    /**
+     * Reads every key, falling back to the shared defaults. Numeric keys are
+     * clamped here rather than at draw time so the renderer can trust them.
+     *
+     * @param density the display's density, needed only to convert a value left
+     *        in the retired raw-pixel {@link Prefs#KEY_OUT_TYPE_SIZE} by an
+     *        install that predates {@link Prefs#KEY_OUT_TYPE_SIZE_DP}; ignored
+     *        once the new key exists
+     */
+    public static TrioSettings from(SharedPreferences p, float density) {
         TrioSettings s = new TrioSettings();
         s.enabled = p.getBoolean(Prefs.KEY_ENABLED, Prefs.DEF_ENABLED);
         s.showWifi = p.getBoolean(Prefs.KEY_SHOW_WIFI, Prefs.DEF_SHOW_WIFI);
@@ -233,9 +251,7 @@ public final class TrioSettings {
         s.typeSize = Prefs.clamp(
                 p.getInt(Prefs.KEY_TYPE_SIZE, Prefs.DEF_TYPE_SIZE),
                 Prefs.MIN_TYPE_SIZE, Prefs.MAX_TYPE_SIZE);
-        s.outTypeSize = Prefs.clamp(
-                p.getInt(Prefs.KEY_OUT_TYPE_SIZE, Prefs.DEF_OUT_TYPE_SIZE),
-                Prefs.MIN_OUT_TYPE_SIZE, Prefs.MAX_OUT_TYPE_SIZE);
+        s.outTypeSize = readOutTypeSize(p, density);
         s.outSignalSize = Prefs.clamp(
                 p.getInt(Prefs.KEY_OUT_SIGNAL_SIZE, Prefs.DEF_OUT_SIGNAL_SIZE),
                 Prefs.MIN_OUT_SIGNAL_SIZE, Prefs.MAX_OUT_SIGNAL_SIZE);
@@ -280,6 +296,39 @@ public final class TrioSettings {
         return p.getBoolean(Prefs.KEY_SHOW_MOBILE_TYPE, Prefs.DEF_SHOW_MOBILE_TYPE)
                 ? Prefs.MOBILE_TYPE_IN_RING
                 : Prefs.MOBILE_TYPE_OFF;
+    }
+
+    /**
+     * Reads the out-of-ring type size, migrating the retired raw-pixel key.
+     *
+     * <p>The dp key wins whenever it is present. Only an install that predates
+     * it - one that may hold a raw-pixel value in {@link Prefs#KEY_OUT_TYPE_SIZE}
+     * - has that value converted once, by dividing by the display density that
+     * gives the pixels their physical size. An install that never touched the
+     * old slider has no old key at all and simply gets the new default, which is
+     * the old default's physical size at the density it was authored on. The old
+     * key is never written again, so like
+     * {@link #readMobileTypeMode(SharedPreferences)} this runs at most until the
+     * user's first write of the new key.
+     *
+     * <p>The conversion rounds before clamping so a user's tuned value lands
+     * exactly where it did: 32px at density 3 reads as 11dp, inside the new
+     * range with room on both sides.
+     */
+    private static int readOutTypeSize(SharedPreferences p, float density) {
+        if (p.contains(Prefs.KEY_OUT_TYPE_SIZE_DP)) {
+            return Prefs.clamp(
+                    p.getInt(Prefs.KEY_OUT_TYPE_SIZE_DP, Prefs.DEF_OUT_TYPE_SIZE_DP),
+                    Prefs.MIN_OUT_TYPE_SIZE_DP, Prefs.MAX_OUT_TYPE_SIZE_DP);
+        }
+        if (p.contains(Prefs.KEY_OUT_TYPE_SIZE)) {
+            final float safeDensity = density > 0f ? density : Prefs.AUTHORED_DENSITY;
+            return Prefs.clamp(
+                    Math.round(p.getInt(Prefs.KEY_OUT_TYPE_SIZE, Prefs.DEF_OUT_TYPE_SIZE)
+                            / safeDensity),
+                    Prefs.MIN_OUT_TYPE_SIZE_DP, Prefs.MAX_OUT_TYPE_SIZE_DP);
+        }
+        return Prefs.DEF_OUT_TYPE_SIZE_DP;
     }
 
     /**
@@ -390,7 +439,7 @@ public final class TrioSettings {
             case Prefs.KEY_VALUE_SIZE: valueSize = src.valueSize; return true;
             case Prefs.KEY_VALUE_WEIGHT: valueWeight = src.valueWeight; return true;
             case Prefs.KEY_TYPE_SIZE: typeSize = src.typeSize; return true;
-            case Prefs.KEY_OUT_TYPE_SIZE: outTypeSize = src.outTypeSize; return true;
+            case Prefs.KEY_OUT_TYPE_SIZE_DP: outTypeSize = src.outTypeSize; return true;
             case Prefs.KEY_OUT_SIGNAL_SIZE: outSignalSize = src.outSignalSize; return true;
             case Prefs.KEY_OUT_TYPE_MARGIN_LEFT: outTypeMarginLeft = src.outTypeMarginLeft; return true;
             case Prefs.KEY_OUT_TYPE_MARGIN_RIGHT: outTypeMarginRight = src.outTypeMarginRight; return true;
@@ -460,8 +509,8 @@ public final class TrioSettings {
                 bundle.getInt(Prefs.KEY_TYPE_SIZE, Prefs.DEF_TYPE_SIZE),
                 Prefs.MIN_TYPE_SIZE, Prefs.MAX_TYPE_SIZE);
         s.outTypeSize = Prefs.clamp(
-                bundle.getInt(Prefs.KEY_OUT_TYPE_SIZE, Prefs.DEF_OUT_TYPE_SIZE),
-                Prefs.MIN_OUT_TYPE_SIZE, Prefs.MAX_OUT_TYPE_SIZE);
+                bundle.getInt(Prefs.KEY_OUT_TYPE_SIZE_DP, Prefs.DEF_OUT_TYPE_SIZE_DP),
+                Prefs.MIN_OUT_TYPE_SIZE_DP, Prefs.MAX_OUT_TYPE_SIZE_DP);
         s.outSignalSize = Prefs.clamp(
                 bundle.getInt(Prefs.KEY_OUT_SIGNAL_SIZE, Prefs.DEF_OUT_SIGNAL_SIZE),
                 Prefs.MIN_OUT_SIGNAL_SIZE, Prefs.MAX_OUT_SIGNAL_SIZE);
@@ -542,7 +591,7 @@ public final class TrioSettings {
         b.putInt(Prefs.KEY_VALUE_SIZE, valueSize);
         b.putInt(Prefs.KEY_VALUE_WEIGHT, valueWeight);
         b.putInt(Prefs.KEY_TYPE_SIZE, typeSize);
-        b.putInt(Prefs.KEY_OUT_TYPE_SIZE, outTypeSize);
+        b.putInt(Prefs.KEY_OUT_TYPE_SIZE_DP, outTypeSize);
         b.putInt(Prefs.KEY_OUT_SIGNAL_SIZE, outSignalSize);
         b.putInt(Prefs.KEY_OUT_TYPE_MARGIN_LEFT, outTypeMarginLeft);
         b.putInt(Prefs.KEY_OUT_TYPE_MARGIN_RIGHT, outTypeMarginRight);
