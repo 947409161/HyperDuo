@@ -823,6 +823,16 @@ bug 的信念来源，已改正。
 `foreground()` 仍把 0 折成 `DEFAULT_FOREGROUND`」两条形状断言。**唯一无法离线替代的是真机那一下**
 —— 改深浅色时环外文字是否立刻跟上。
 
+**同拍反色（1.6.4，issue #2 的修复）**：上面的 draw-pass 比较仍是安全网，但它有一个观感缺陷——
+MIUI 的深浅色是**逐帧动画**（`updateLightDarkTint` 每帧被值动画调一次，`onLightDarkTintChanged` 是
+免动画直调），原生图标跟着动画渐变；环外视图却要等字形**下一帧** onDraw 才比较出墨色变了、然后
+一步翻过去——用户看到的就是「别人在过渡，它迟一秒突变」。修法：hook 组 9 拦
+`MiuiBatteryMeterView.updateLightDarkTint`，proceed 后**当场**用本帧参数算出墨色并经
+`applyOutRingInk`（与 post 路径共用的一行上色体）直接给两个视图上色——无 post、无等待，环外视图
+从此与原生图标同速渐变。墨色解析复刻 `TrioState.foreground()` 的三分支（`useTint ? tintColor :
+(intensity > 0 ? darkColor : lightColor)`，0 折白），保证两条路径算出的是**同一个数**；钩子体每帧
+只有几次字段读和一次颜色比较，与 MIUI 自己每帧的付出同级。
+
 ### 双卡信号
 
 「双卡信号」（`dual_sim_signal`）在**无 Wi-Fi 且未充电**时把一排点换成上下两排：**上排 = 卡一

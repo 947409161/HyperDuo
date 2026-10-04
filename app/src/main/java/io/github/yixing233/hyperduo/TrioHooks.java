@@ -282,6 +282,8 @@ final class TrioHooks {
         hooked += group(module, cl, 5);
         hooked += group(module, cl, 6);
         hooked += group(module, cl, 7);
+        hooked += group(module, cl, 8);
+        hooked += group(module, cl, 9);
         log(module, "HyperDuo installed, hooks=" + hooked
                 + " enabled=" + TrioConfig.get().enabled);
     }
@@ -637,7 +639,9 @@ final class TrioHooks {
                 case 5: return hookSignalIcons(module, cl);
                 case 6: return hookIconContainerLayout(module, cl);
                 case 7: return hookMobileType(module, cl);
-                default: return hookMobileTypeVisibility(module, cl);
+                case 8: return hookMobileTypeVisibility(module, cl);
+                case 9: return hookMeterTint(module, cl);
+                default: return 0;
             }
         } catch (Throwable t) {
             log(module, "hook group " + which + " failed: " + t);
@@ -1125,6 +1129,86 @@ final class TrioHooks {
             NATIVE_TYPE_VIEW_CACHE.put(Integer.valueOf(id), Boolean.valueOf(match));
         }
         return match;
+    }
+
+    /**
+     * Recolours the out-of-ring views in the same beat MIUI tints the meter.
+     *
+     * <p>The tint pipeline reaches this module's two sibling views only
+     * indirectly: the tint animation runs once per animation frame through
+     * {@code MiuiBatteryMeterView.updateLightDarkTint}, which ends in the
+     * battery icon's own {@code invalidate()} - and the icon's next draw is
+     * where the draw-pass comparison picks the new ink up. That indirection is
+     * the "delayed transition" of issue #2: the native icons ride MIUI's
+     * animation, while the label and the reading wait for the glyph's next
+     * frame and then flip in one step.
+     *
+     * <p>Hooking {@code updateLightDarkTint} (the single door both the animated
+     * and the instant path walk through - see {@code onLightDarkTintChanged}
+     * and the value animator inside the meter) puts the two views on MIUI's own
+     * schedule: after the meter has applied this frame's tint, the frame's
+     * final tint colour is handed to {@link #applyOutRingInk} directly, no post
+     * and no draw needed, so label and reading blend at the same pace as every
+     * native icon.
+     *
+     * <p>The hook fires per animation frame (a transition is a handful of
+     * frames), and the body is two field reads and a colour compare per frame
+     * - the same weight MIUI itself pays per frame. No book is needed here:
+     * {@code applyOutRingInk} compares before writing, and the draw-pass
+     * comparison stays as the safety net for tint changes that arrive without
+     * this method (a config change, a restored view tree).
+     */
+    private static int hookMeterTint(XposedModule module, ClassLoader cl) {
+        final Class<?> meter = Refl.cls(
+                "com.android.systemui.statusbar.views.MiuiBatteryMeterView", cl);
+        if (meter == null) {
+            log(module, "MiuiBatteryMeterView missing");
+            return 0;
+        }
+        return hook(module, Refl.method(meter, "updateLightDarkTint",
+                        ArrayList.class, float.class, int.class, int.class,
+                        int.class, boolean.class),
+                "hyperduo-meter-tint", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object result = chain.proceed();
+                        final Object self = chain.getThisObject();
+                        if (self instanceof View && TrioConfig.appearance().typeAnywhere()) {
+                            // Signature: (areas, intensity, tintColor, light, dark,
+                            // useTint). Resolve the ink exactly the way
+                            // TrioState.foreground() resolves it from the very
+                            // fields this call installs, so the tint-path colour
+                            // and the draw-path colour are one number by
+                            // construction.
+                            final boolean useTint = Boolean.TRUE.equals(chain.getArg(5));
+                            final int intensity =
+                                    (chain.getArg(1) instanceof Float)
+                                            ? ((Float) chain.getArg(1)).intValue() : 0;
+                            final Object tintObj = chain.getArg(2);
+                            final Object lightObj = chain.getArg(3);
+                            final Object darkObj = chain.getArg(4);
+                            final int tint = (tintObj instanceof Integer)
+                                    ? (Integer) tintObj : 0;
+                            final int light = (lightObj instanceof Integer)
+                                    ? (Integer) lightObj : 0;
+                            final int dark = (darkObj instanceof Integer)
+                                    ? (Integer) darkObj : 0;
+                            int ink = useTint ? tint
+                                    : (intensity > 0f ? dark : light);
+                            if (ink == 0) {
+                                // Same fold TrioState.foreground() applies, so a
+                                // not-yet-tinted meter paints white here too.
+                                ink = 0xFFFFFFFF;
+                            }
+                            final View v = (View) self;
+                            final Object owner = batteryContainerOf(v);
+                            if (owner instanceof ViewGroup) {
+                                applyOutRingInk((ViewGroup) owner, ink);
+                            }
+                        }
+                        return result;
+                    }
+                });
     }
 
     // ------------------------------------------------------------- registrations
@@ -2107,22 +2191,33 @@ final class TrioHooks {
             @Override
             public void run() {
                 final Object owner = batteryContainerOf(host);
-                if (!(owner instanceof ViewGroup)) {
-                    return;
-                }
-                final ViewGroup container = (ViewGroup) owner;
-                final OutTypeLabel label = findOutTypeLabel(container);
-                if (label != null && label.getCurrentTextColor() != ink) {
-                    label.setTextColor(ink);
-                }
-                final OutSignalView signal = findOutSignal(container);
-                if (signal != null) {
-                    // It would redraw with the new colour on its own, but only
-                    // if something asked it to - and nothing did.
-                    signal.invalidate();
+                if (owner instanceof ViewGroup) {
+                    applyOutRingInk((ViewGroup) owner, ink);
                 }
             }
         });
+    }
+
+    /**
+     * Hands one ink to the out-of-ring views under {@code container} - the
+     * label outright, the reading as a repaint request. The one-line body both
+     * tint paths share, so they cannot drift apart.
+     *
+     * <p>Safe to call directly (no post) from the tint hook, which runs outside
+     * any layout or draw pass; the draw-pass path above keeps its post because
+     * it runs inside the glyph's onDraw.
+     */
+    private static void applyOutRingInk(ViewGroup container, int ink) {
+        final OutTypeLabel label = findOutTypeLabel(container);
+        if (label != null && label.getCurrentTextColor() != ink) {
+            label.setTextColor(ink);
+        }
+        final OutSignalView signal = findOutSignal(container);
+        if (signal != null) {
+            // It would redraw with the new colour on its own, but only if
+            // something asked it to - and nothing did.
+            signal.invalidate();
+        }
     }
 
     /**
