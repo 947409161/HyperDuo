@@ -2,6 +2,7 @@ package io.github.yixing233.hyperduo;
 
 import android.content.Context;
 import android.content.res.Resources;
+import android.net.wifi.WifiManager;
 import android.os.SystemClock;
 import android.telephony.SignalStrength;
 import android.telephony.SubscriptionInfo;
@@ -102,6 +103,8 @@ final class TrioState {
     private static volatile Context sContext;
     /** Next {@link SystemClock#elapsedRealtime} at which telephony may be polled. */
     private static volatile long sSimsDueAt;
+    /** Next fallback Wi-Fi RSSI sample, used when Flyme exposes no icon resource. */
+    private static volatile long sWifiDueAt;
     /** How often telephony is polled. Signal strength is not a per-frame value. */
     private static final long SIMS_INTERVAL_MS = 2000L;
 
@@ -185,17 +188,27 @@ final class TrioState {
             return;
         }
         fLevel = Refl.field(c, "mLevel");
+        if (fLevel == null) {
+            // Flyme AIOS 2.0's FlymeBatteryMeterView stores the latest level here.
+            fLevel = Refl.field(c, "mLastLevel");
+        }
         fCharging = Refl.field(c, "mCharging");
         fQuick = Refl.field(c, "mQuickCharging");
         fLow = Refl.field(c, "mLow");
         fPowerSave = Refl.field(c, "mPowerSave");
+        if (fPowerSave == null) {
+            fPowerSave = Refl.field(c, "mLowPowerMode");
+        }
         fPerformance = Refl.field(c, "mPerformanceMode");
         fUseTint = Refl.field(c, "mUseTint");
         fTint = Refl.field(c, "mTintColor");
         fLight = Refl.field(c, "mLightColor");
         fDark = Refl.field(c, "mDarkColor");
         fIntensity = Refl.field(c, "mDarkIntensity");
-        fieldsReady = fLevel != null;
+        // A Flyme view does not expose every MIUI meter field. Missing optional
+        // fields use their initialized defaults; do not repeat reflection on
+        // every frame just because one ROM omits mLevel.
+        fieldsReady = true;
     }
 
     /** Re-reads every status value from the host. Cheap enough to call in onDraw. */
@@ -227,6 +240,9 @@ final class TrioState {
             sampleSimsIfDue();
         }
 
+        if (sWifiLevel < 0) {
+            sampleWifiIfDue();
+        }
         wifiLevel = sWifiLevel;
         mobileLevel = sMobileLevel;
         wifiPresent = sWifiPresent;
@@ -242,6 +258,28 @@ final class TrioState {
         if (mobileLevel < 0 && sDataSlot >= 0 && sDataSlot < SIM_SLOTS
                 && slots[sDataSlot] >= 0) {
             mobileLevel = slots[sDataSlot];
+        }
+    }
+
+    /** Best-effort Wi-Fi level when Flyme's status-bar state has no known icon id. */
+    private static void sampleWifiIfDue() {
+        final long now = SystemClock.elapsedRealtime();
+        if (now < sWifiDueAt || sContext == null) {
+            return;
+        }
+        sWifiDueAt = now + SIMS_INTERVAL_MS;
+        try {
+            final WifiManager wifi = (WifiManager) sContext.getApplicationContext()
+                    .getSystemService(Context.WIFI_SERVICE);
+            if (wifi == null || !wifi.isWifiEnabled()) {
+                return;
+            }
+            final android.net.wifi.WifiInfo info = wifi.getConnectionInfo();
+            if (info != null && info.getNetworkId() != -1) {
+                sWifiLevel = WifiManager.calculateSignalLevel(info.getRssi(), 4);
+            }
+        } catch (Throwable ignored) {
+            // Signal-icon resources remain the preferred source.
         }
     }
 

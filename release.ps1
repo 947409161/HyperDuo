@@ -44,7 +44,7 @@ $ErrorActionPreference = 'Stop'
 
 $Root    = 'C:\code\HyperDuo'
 $Tools   = Join-Path $Root '.tools'
-$Repo    = 'yixing233/HyperDuo'
+$Repo    = '947409161/HyperDuo'
 $Package = 'io.github.yixing233.hyperduo'
 
 # 原生程序把进度和警告写到 stderr（git 的 "Everything up-to-date"、gradle 的弃用提示）。

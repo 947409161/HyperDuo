@@ -1,0 +1,47 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assemble-debug:
+    name: Assemble debug APK
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install Android SDK 37
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0"
+          sdk_root="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          if [[ ! -e "$sdk_root/platforms/android-37" ]]; then
+            ln -s android-37.0 "$sdk_root/platforms/android-37"
+          fi
+
+      - name: Set up Gradle 9.8
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.8'
+
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --console=plain

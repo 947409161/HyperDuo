@@ -189,11 +189,11 @@ release 开启 `isMinifyEnabled` + `isShrinkResources`，但 `proguard-rules.pro
 **为什么一个版本必须带 APK**：应用内更新器读的是 `/releases/latest`。如果一个 Release 存在却
 没有 APK asset，用户会看到一个装不上的「新版本」。所以宁可失败也不要发空 Release。
 
-**为什么不用 GitHub Actions**：最初的 `release.yml` 在 `android-actions/setup-android@v3` 这
-一步就失败了（`platforms;android-37.0` 是 `compileSdk 37` 这种很新的版本化平台，托管 runner 上
-的 setup-android 拿不到），后续步骤全部跳过。修这个要有权限调试别人的 action，而本地产出 APK
-只需要几十秒且工具链已经 vendored，所以改成 `release.ps1`。发布脚本与本地构建共用同一套命令，
-不会出现「CI 能过、本地过不了」的分叉。
+**GitHub Actions**：`.github/workflows/android.yml` 在推送、PR 和手动触发时构建 debug APK。
+GitHub 托管 runner 将 API 37 平台安装在 `platforms/android-37.0`，而 AGP 按 `compileSdk = 37`
+查找 `platforms/android-37`；workflow 安装 SDK 后补建该兼容目录。CI 使用与本地相同的 JDK 21、
+Gradle 9.8 和 `:app:assembleDebug` 命令。正式发布仍由 `release.ps1` 本地完成，CI 不创建
+Release 或推送 tag。
 
 #### 改 `release.ps1` 时的两个坑
 

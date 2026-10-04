@@ -311,6 +311,12 @@ final class TrioHooks {
                 applyConfigChange();
             }
         });
+        if (FlymeHooks.isFlyme(cl)) {
+            final int hooked = FlymeHooks.install(module, cl);
+            log(module, "Flyme adapter installed, hooks=" + hooked
+                    + " enabled=" + TrioConfig.get().enabled);
+            return;
+        }
         int hooked = 0;
         hooked += group(module, cl, 1);
         hooked += group(module, cl, 2);
@@ -367,6 +373,10 @@ final class TrioHooks {
                     applyConfigChange();
                 }
             });
+            return;
+        }
+        if (FlymeHooks.isActive()) {
+            FlymeHooks.onConfigChanged();
             return;
         }
         final TrioAppearance a = TrioAppearance.of(TrioConfig.get());

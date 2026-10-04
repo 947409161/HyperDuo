@@ -71,13 +71,13 @@ HyperDuo 是一个 LSPosed 模块，只作用于系统界面（`com.android.syst
 
 | 项目 | 要求 |
 | --- | --- |
-| 系统 | HyperOS / MIUI（已在 HyperOS 4 上完整验证） |
+| 系统 | HyperOS / MIUI（已在 HyperOS 4 上完整验证）；Flyme AIOS 2.0 适配分支已加入，尚未实机验证 |
 | Android | 10 及以上（API 29+） |
 | 框架 | 支持 libxposed **API 102** 的 LSPosed，例如 LSPosed 2.2.0-it（7890） |
 
 ### 步骤
 
-1. 从 [Releases](https://github.com/yixing233/HyperDuo/releases) 下载最新的 `HyperDuo-*.apk`
+1. 从 [Releases](https://github.com/947409161/HyperDuo/releases) 下载最新的 `HyperDuo-*.apk`
    并安装。
    > 如果 Releases 里还没有可用安装包，可以按 [开发文档](docs/DEVELOPMENT.md) 自行构建。
    > 新版包名是 `io.github.yixing233.hyperduo`（1.3 及更早是 `com.hyperduo.trio`）。包名变了
@@ -233,7 +233,8 @@ adb shell "su -c 'killall com.android.systemui'"
 **支持哪些机型和系统？**
 
 目前只在 **小米 14 · HyperOS 4 · Android 17（API 37）** 上做过完整验证。HyperOS / MIUI 的其他
-机型与版本理论可用，但状态栏内部实现不同时，对应功能会自动跳过并写下日志，不会崩溃。
+机型与版本理论可用，但状态栏内部实现不同时，对应功能会自动跳过并写下日志，不会崩溃。Flyme AIOS 2.0
+已有基于系统界面 APK 的适配代码，尚未做设备验证，网络类型标签和环外信号布局也还未适配。
 
 **检查更新提示「作者尚未发布任何正式版本」？**
 
