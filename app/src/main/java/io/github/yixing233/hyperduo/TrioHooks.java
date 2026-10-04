@@ -157,13 +157,28 @@ final class TrioHooks {
         // itself: as the glyph's dots, or as the out-of-ring reading. Leaving it
         // in place out of ring with the stacked switch off is what keeps MIUI's
         // own icon on screen, which is the whole difference the switch makes.
-        // Under the island the glyph cannot draw its dots either, so the reading
-        // takes over regardless of where the user keeps the signal - and the
-        // mobile slot folds whenever that reading is drawn.
-        if (a.foldsMobile() || islandHideBattery()) {
+        // The island does not change this: what it changes is *where* the
+        // module draws the signal (out of ring, since the glyph is gone), not
+        // whether the user asked for it - so the fold condition is untouched and
+        // the reading takes over in syncOutSignal.
+        if (a.foldsMobile()) {
             slots.addAll(MOBILE_SLOTS);
         }
         return slots;
+    }
+
+    /**
+     * Whether the module should be drawing the out-of-ring signal reading.
+     *
+     * <p>Two ways in: the user asked for it (out of ring + stacked), or the
+     * charging island took the glyph away while the user still wants the signal
+     * drawn in-ring - the reading is the only place left to put it. A user who
+     * switched the mobile reading off entirely asked for no signal of ours
+     * anywhere, so the island leaves the native icon in place instead.
+     */
+    private static boolean outSignalWanted() {
+        final TrioAppearance a = TrioConfig.appearance();
+        return a.stackedOut() || (islandHideBattery() && a.foldsMobile());
     }
 
     /**
@@ -2588,7 +2603,27 @@ final class TrioHooks {
         // protected in View, and the result is identical.
         final boolean rtl =
                 container.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
-        int left = rtl ? anchor.getRight() + gap : anchor.getLeft() - gap - width;
+        // The horizontal reference is the native icon row's own edge, not the
+        // battery meter's. The two coincide whenever the battery is laid out
+        // normally - which is why the meter worked, and why this changes
+        // nothing about the ordinary frame - but the charging super island
+        // breaks the equivalence: MiuiStatusBatteryContainer stops subtracting
+        // the battery's width from the row's bound (so the row slides clear of
+        // the island) while still measuring and laying the meter out at its old
+        // place and merely marking it INVISIBLE. Anchored on the meter, the
+        // reading then landed a whole battery width left of the row's real end,
+        // on top of the native icons that had moved there. The row's edge is the
+        // one bound that is right in both states - and it is also exactly where
+        // reserveOutRingStrip's padding ends, so the views land inside the strip
+        // they reserved rather than across the icons.
+        final View icons = iconContainerIn(container);
+        final boolean useIcons = icons != null && icons.getWidth() > 0;
+        final int edge = rtl
+                ? (useIcons ? icons.getLeft() : anchor.getRight())
+                : (useIcons ? icons.getRight() : anchor.getLeft());
+        int left = rtl ? edge + gap : edge - gap - width;
+        // Vertical reference stays with the anchor: its frame is laid out
+        // unconditionally, so it is the same row centre island or not.
         int top = anchor.getTop() + (anchor.getHeight() - height) / 2;
         // Stay inside the container even when the meter sits flush against an
         // edge. The container itself carries no padding here - the include in
@@ -2868,11 +2903,10 @@ final class TrioHooks {
             return;
         }
         final ViewGroup container = (ViewGroup) owner;
-        final TrioAppearance a = TrioConfig.appearance();
-        // Under the island the glyph cannot carry the dots, so the reading takes
-        // over regardless of the user's signal-mode or stacked switches - the
-        // islandHideBattery flag already folded the mobile slot for it.
-        final boolean wanted = a.stackedOut() || islandHideBattery();
+        // Two ways in: the user asked for the reading, or the island took the
+        // glyph away while the user still wants the signal drawn in-ring - the
+        // reading is then the only place left for it.
+        final boolean wanted = outSignalWanted();
         final OutSignalView view = findOutSignal(container);
         if (!wanted) {
             removeOutSignal(container);
@@ -2954,9 +2988,9 @@ final class TrioHooks {
     private static void requestOutSignalSync(final ViewGroup container) {
         // Same condition syncOutSignal mounts the reading under, so a layout
         // pass can never queue a sync the posted path would immediately undo -
-        // which matters under the island, where the reading is wanted even with
-        // the stacked switch off.
-        if (!TrioConfig.appearance().stackedOut() && !islandHideBattery()) {
+        // which matters under the island, where the reading is wanted with the
+        // stacked switch off as long as the user keeps the signal on.
+        if (!outSignalWanted()) {
             return;
         }
         final View host = hostIn(container);

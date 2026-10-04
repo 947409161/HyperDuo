@@ -1057,9 +1057,27 @@ hook 组 10 拦 `setIsHideBattery`，把值记进 `TrioState.sIslandHideBattery`
   `requestOutSignalSync` 的门放宽为 `stackedOut() || islandHideBattery()`）——环内读不了信号，
   环外读数顶上，与用户是否开过「环外 + 堆叠」无关。
 
-环外标签（用户开了环外类型时）继续显示：锚链 `labelAnchorIn` 优先取环外读数——岛下读数必在，
-锚点自然落在读数上而非失效的电池上。岛收回（`setIsHideBattery(false)`）时同一套反应把三件事
-还原：字形恢复、Wi-Fi 槽重新折叠（若用户开着弧）、环外读数按用户原设置决定去留。
+环外标签（用户开了环外类型时）继续显示：锚链 `labelAnchorIn` 优先取环外读数——岛下读数必在。
+岛收回（`setIsHideBattery(false)`）时同一套反应把三件事还原：字形恢复、Wi-Fi 槽重新折叠（若用户
+开着弧）、环外读数按用户原设置决定去留。
+
+**接管条件的精确边界（1.6.7）**：岛只改变信号**画在哪里**，不改变用户**是否要它**。所以
+`foldedSlots()` 的 mobile 折叠条件**保持 `a.foldsMobile()` 不变**（原来是
+`a.foldsMobile() || islandHideBattery()`，那会在用户关掉移动信号时凭空折掉原生图标），改由
+`outSignalWanted()` 表达真正的规则：`stackedOut() || (islandHideBattery() && foldsMobile())`
+——用户要信号且岛夺走了字形，读数才顶上；用户本就不要信号的机器上，原生图标留在原地。
+
+**横向参考系改到图标行边缘（1.6.7，修 1.6.6 的坐标错误）**：`placeOutTypeLabel` 原先锚
+`meter.getLeft()`。正常态它等于图标行的右界（容器把行右界算作「容器右 − paddingEnd − 电池宽」，
+电池正被布局在那里），所以一直是对的；**岛上这个等价被破坏**——`MiuiStatusBatteryContainer`
+的 `onMeasure` 不再把电池宽度累加进 measuredWidth、`onLayout` 里行右界 `i7` 也不再减电池宽
+（行因此右移让位），但电池视图本身**仍按原位布局、只被 `updateVisibility$6()` 设为
+`INVISIBLE(4)`**（不可见但仍占位，不是 GONE）。于是锚在 meter 上的读数落在比行末**左移一个电池
+宽**处，正好压在被右移过来的原生图标（网速、信号）上——用户截图里的重叠。
+修法：横向基准取 `iconContainerIn(container)` 的 `getRight()`（RTL 取 `getLeft()`），即图标行
+真正的末端，也正是 `reserveOutRingStrip` 预留 padding 收尾的地方，读数因此落在自己预留的条带
+里；`icons` 取不到或未测量时退回原来的 anchor 边。垂直基准仍取 anchor（它的 frame 无条件布局，
+两态一致）。两态下该边缘与 meter 左缘相等或正好差一个电池宽，所以正常外观逐像素不变。
 
 ## 配置项参考
 
