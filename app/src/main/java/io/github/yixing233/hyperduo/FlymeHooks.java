@@ -27,6 +27,8 @@ final class FlymeHooks {
             "com.flyme.statusbar.battery.FlymeBatteryMeterView";
     private static final String PHONE_STATUS_BAR_VIEW =
             "com.android.systemui.statusbar.phone.PhoneStatusBarView";
+    private static final String QS_STATUS_BAR =
+            "com.flyme.systemui.controlcenter.qs.QSStatusBar";
     private static final String ICON_CONTAINER =
             "com.android.systemui.statusbar.phone.StatusIconContainer";
     private static final String WIFI_VIEW =
@@ -52,11 +54,14 @@ final class FlymeHooks {
     /** The exact slot names this adapter inserted into StatusIconContainer. */
     private static final Map<Object, List<String>> ADDED_SLOTS =
             Collections.synchronizedMap(new WeakHashMap<Object, List<String>>());
+    /** Flyme has separate status icon containers for the status bar and Control Center. */
+    private static final Map<ViewGroup, Boolean> STATUS_ICON_CONTAINERS =
+            Collections.synchronizedMap(new WeakHashMap<ViewGroup, Boolean>());
 
     private static volatile boolean sActive;
     private static volatile XposedModule sModule;
-    private static volatile ViewGroup sStatusIconContainer;
     private static volatile Field sSystemIconAreaField;
+    private static volatile Field sQsIconContainerField;
     private static volatile Field sIgnoredSlotsField;
     private static volatile Field sWifiViewStateField;
     private static volatile Field sWifiStateResIdField;
@@ -81,6 +86,7 @@ final class FlymeHooks {
         int count = 0;
         count += hookBatteryView(module, cl);
         count += hookStatusBarCapture(module, cl);
+        count += hookControlCenterCapture(module, cl);
         count += hookIconContainer(module, cl);
         count += hookWifiState(module, cl);
         count += hookMobileSignal(module, cl);
@@ -89,14 +95,20 @@ final class FlymeHooks {
     }
 
     static void onConfigChanged() {
-        final ViewGroup container = sStatusIconContainer;
-        if (container != null) {
-            container.post(new Runnable() {
-                @Override
-                public void run() {
-                    applySlots(container);
-                }
-            });
+        final List<ViewGroup> containers = new ArrayList<ViewGroup>();
+        synchronized (STATUS_ICON_CONTAINERS) {
+            containers.addAll(STATUS_ICON_CONTAINERS.keySet());
+        }
+        for (int i = 0; i < containers.size(); i++) {
+            final ViewGroup container = containers.get(i);
+            if (container != null) {
+                container.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        applySlots(container);
+                    }
+                });
+            }
         }
         final List<View> hosts = new ArrayList<View>();
         synchronized (STATES) {
@@ -221,8 +233,7 @@ final class FlymeHooks {
                         if (area instanceof View) {
                             final ViewGroup found = findIconContainer((View) area);
                             if (found != null) {
-                                sStatusIconContainer = found;
-                                applySlots(found);
+                                registerIconContainer(found);
                                 log(sModule, "Flyme status icon container captured: "
                                         + found.getClass().getName());
                             } else {
@@ -236,6 +247,43 @@ final class FlymeHooks {
                         return result;
                     }
                 });
+    }
+
+    /** Control Center owns another StatusIconContainer inside its QSStatusBar. */
+    private static int hookControlCenterCapture(XposedModule module, ClassLoader cl) {
+        final Class<?> qsStatusBar = Refl.cls(QS_STATUS_BAR, cl);
+        if (qsStatusBar == null) {
+            log(module, "Flyme QSStatusBar missing");
+            return 0;
+        }
+        sQsIconContainerField = Refl.field(qsStatusBar, "mIconContainer");
+        return hook(module, Refl.method(qsStatusBar, "onFinishInflate"),
+                "hyperduo-flyme-control-center", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object result = chain.proceed();
+                        final Object self = chain.getThisObject();
+                        final Object icons = Refl.get(sQsIconContainerField, self);
+                        if (icons instanceof ViewGroup) {
+                            registerIconContainer((ViewGroup) icons);
+                            log(sModule, "Flyme Control Center icon container captured");
+                        }
+                        if (self instanceof View) {
+                            final View view = (View) self;
+                            TrioConfig.installReceiver(view.getContext());
+                            TrioState.attachContext(view.getContext());
+                        }
+                        return result;
+                    }
+                });
+    }
+
+    private static void registerIconContainer(ViewGroup container) {
+        synchronized (STATUS_ICON_CONTAINERS) {
+            STATUS_ICON_CONTAINERS.put(container, Boolean.TRUE);
+        }
+        applySlots(container);
+        updateWifiPresence(container);
     }
 
     private static int hookIconContainer(XposedModule module, ClassLoader cl) {
@@ -252,7 +300,7 @@ final class FlymeHooks {
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
                         final Object result = chain.proceed();
                         final Object self = chain.getThisObject();
-                        if (self == sStatusIconContainer && self instanceof ViewGroup) {
+                        if (self instanceof ViewGroup && isRegistered((ViewGroup) self)) {
                             applySlots((ViewGroup) self);
                             updateWifiPresence((ViewGroup) self);
                         }
@@ -408,7 +456,7 @@ final class FlymeHooks {
     }
 
     private static void applySlots(ViewGroup container) {
-        if (container != sStatusIconContainer) {
+        if (!isRegistered(container)) {
             return;
         }
         final TrioAppearance appearance = TrioConfig.appearance();
@@ -472,6 +520,12 @@ final class FlymeHooks {
         }
         if (slotsChanged) {
             container.requestLayout();
+        }
+    }
+
+    private static boolean isRegistered(ViewGroup container) {
+        synchronized (STATUS_ICON_CONTAINERS) {
+            return STATUS_ICON_CONTAINERS.containsKey(container);
         }
     }
 
