@@ -38,6 +38,8 @@ final class TrioState {
     /** Latest resolved signal levels; shared by every trio host. */
     static volatile int sWifiLevel = -1;
     static volatile int sMobileLevel = -1;
+    /** Last level delivered by FlymeBatteryMeterView's BatteryController callback. */
+    private static volatile int sFlymeBatteryLevel = -1;
 
     /**
      * Whether the status bar is currently showing a Wi-Fi indicator at all.
@@ -216,6 +218,10 @@ final class TrioState {
     void refresh() {
         ensureFields(host.getClass());
         level = Refl.getInt(fLevel, host, level);
+        if ("com.flyme.statusbar.battery.FlymeBatteryMeterView"
+                .equals(host.getClass().getName()) && sFlymeBatteryLevel >= 0) {
+            level = sFlymeBatteryLevel;
+        }
         if (level < 0) {
             final int systemLevel = systemBatteryLevel(host);
             if (systemLevel >= 0) {
@@ -265,6 +271,12 @@ final class TrioState {
         if (mobileLevel < 0 && sDataSlot >= 0 && sDataSlot < SIM_SLOTS
                 && slots[sDataSlot] >= 0) {
             mobileLevel = slots[sDataSlot];
+        }
+    }
+
+    static void noteFlymeBatteryLevel(int level) {
+        if (level >= 0 && level <= 100) {
+            sFlymeBatteryLevel = level;
         }
     }
 

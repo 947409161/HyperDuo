@@ -1,8 +1,10 @@
 package io.github.yixing233.hyperduo;
 
 import android.graphics.Canvas;
+import android.content.res.Resources;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -10,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.WeakHashMap;
 
@@ -32,6 +35,12 @@ final class FlymeHooks {
             "com.flyme.systemui.statusbar.net.wifi.WifiIconState";
     private static final String MOBILE_SIGNAL_DRAWABLE =
             "com.android.settingslib.graph.SignalDrawable";
+    private static final String ICON_VIEW_BINDER =
+            "com.android.systemui.common.ui.binder.IconViewBinder";
+    private static final String SYSTEM_ICON =
+            "com.android.systemui.common.shared.model.Icon";
+    private static final String RESOURCE_ICON =
+            "com.android.systemui.common.shared.model.Icon$Resource";
     private static final List<String> MANAGED_SLOTS = Collections.unmodifiableList(
             Arrays.asList("wifi", "mobile", "stacked_mobile"));
 
@@ -52,6 +61,7 @@ final class FlymeHooks {
     private static volatile Field sWifiViewStateField;
     private static volatile Field sWifiStateResIdField;
     private static volatile Field sBatteryPercentField;
+    private static volatile Field sResourceIconResField;
 
     private FlymeHooks() {
     }
@@ -74,6 +84,7 @@ final class FlymeHooks {
         count += hookIconContainer(module, cl);
         count += hookWifiState(module, cl);
         count += hookMobileSignal(module, cl);
+        count += hookMobileTypeIcon(module, cl);
         return count;
     }
 
@@ -135,6 +146,21 @@ final class FlymeHooks {
                         return result;
                     }
                 });
+        final int levelChanged = hook(module, Refl.method(viewClass,
+                        "onBatteryLevelChanged", int.class, boolean.class, boolean.class),
+                "hyperduo-flyme-battery-level", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object result = chain.proceed();
+                        final Object self = chain.getThisObject();
+                        final Object value = chain.getArg(0);
+                        if (self instanceof View && value instanceof Number) {
+                            TrioState.noteFlymeBatteryLevel(((Number) value).intValue());
+                            ((View) self).postInvalidate();
+                        }
+                        return result;
+                    }
+                });
         final int dark = hook(module, Refl.method(viewClass, "onDarkChanged",
                         ArrayList.class, float.class, int.class),
                 "hyperduo-flyme-dark", new XposedInterface.Hooker() {
@@ -175,7 +201,7 @@ final class FlymeHooks {
                         return result;
                     }
                 });
-        return draw + dark + detached;
+        return draw + levelChanged + dark + detached;
     }
 
     private static int hookStatusBarCapture(XposedModule module, ClassLoader cl) {
@@ -283,6 +309,102 @@ final class FlymeHooks {
                         return result;
                     }
                 });
+    }
+
+    /** Reads Flyme's native network-type icon resource and converts it to text. */
+    private static int hookMobileTypeIcon(XposedModule module, ClassLoader cl) {
+        final Class<?> binder = Refl.cls(ICON_VIEW_BINDER, cl);
+        final Class<?> icon = Refl.cls(SYSTEM_ICON, cl);
+        final Class<?> resourceIcon = Refl.cls(RESOURCE_ICON, cl);
+        final Class<?> imageView = Refl.cls("android.widget.ImageView", cl);
+        if (binder == null || icon == null || resourceIcon == null || imageView == null) {
+            log(module, "Flyme IconViewBinder/Icon.Resource missing");
+            return 0;
+        }
+        sResourceIconResField = Refl.field(resourceIcon, "res");
+        final int bind = hook(module, Refl.method(binder, "bind", icon, imageView),
+                "hyperduo-flyme-mobile-type", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object result = chain.proceed();
+                        final Object target = chain.getArg(1);
+                        if (target instanceof ImageView && isMobileTypeView((View) target)) {
+                            final Object drawable = chain.getArg(0);
+                            final int resId = Refl.getInt(sResourceIconResField, drawable, 0);
+                            final String type = mobileTypeForResource(
+                                    ((View) target).getResources(), resId);
+                            if (TrioState.setMobileType(type)) {
+                                invalidateHosts();
+                            }
+                        }
+                        return result;
+                    }
+                });
+
+        // Flyme's binder clears a missing network-type icon directly with
+        // ImageView.setImageResource(0), bypassing IconViewBinder.bind().
+        final int clear = hook(module, Refl.method(imageView, "setImageResource", int.class),
+                "hyperduo-flyme-mobile-type-clear", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object result = chain.proceed();
+                        final Object self = chain.getThisObject();
+                        final Object resId = chain.getArg(0);
+                        if (self instanceof View && isMobileTypeView((View) self)
+                                && resId instanceof Number
+                                && ((Number) resId).intValue() == 0
+                                && TrioState.setMobileType("")) {
+                            invalidateHosts();
+                        }
+                        return result;
+                    }
+                });
+        return bind + clear;
+    }
+
+    private static boolean isMobileTypeView(View view) {
+        try {
+            return "mobile_type".equals(view.getResources()
+                    .getResourceEntryName(view.getId()));
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static String mobileTypeForResource(Resources resources, int resId) {
+        if (resId == 0 || resources == null) {
+            return "";
+        }
+        try {
+            final String name = resources.getResourceEntryName(resId).toLowerCase(Locale.ROOT);
+            if (!name.startsWith("ic_")) {
+                return "";
+            }
+            if (name.startsWith("ic_5g_plus_plus")) {
+                return "5G++";
+            }
+            if (name.startsWith("ic_5g_plus")) {
+                return "5G+";
+            }
+            if (name.startsWith("ic_5g_a")) {
+                return "5GA";
+            }
+            if (name.startsWith("ic_5g_e")) {
+                return "5G E";
+            }
+            if (name.startsWith("ic_5g")) {
+                return "5G";
+            }
+            if (name.startsWith("ic_4g_plus") || name.startsWith("ic_4g_lte_plus")) {
+                return "4G+";
+            }
+            if (name.startsWith("ic_4g")) {
+                return "4G";
+            }
+        } catch (Throwable ignored) {
+            // Unknown resources clear the custom label and leave native UI intact.
+        }
+        return "";
     }
 
     private static void applySlots(ViewGroup container) {
