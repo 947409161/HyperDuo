@@ -1504,15 +1504,26 @@ final class TrioHooks {
                 if (child == null || !"wifi".equals(slotOf(child))) {
                     continue;
                 }
-                // Presence means "MIUI is actually showing it". A turned-off
-                // indicator is not removed from the container: MIUI keeps the
-                // view and just stops binding it, so counting children alone
-                // left the arcs on screen forever. isIconVisible() is the
-                // binding-driven answer and is independent of the View.GONE this
-                // module applies to the folded slots.
+                // Two independent witnesses, either of which says "connected":
+                //
+                // 1. isIconVisible() - the binding-driven answer MIUI itself
+                //    uses. Honest on the tested HyperOS 4 build, but observed
+                //    returning false on a 4.0.0.28 beta while the Wi-Fi was in
+                //    fact connected (issue #5: no arcs drawn, and the native
+                //    icon - which appears the moment the arcs are switched off,
+                //    proving the fold was fine) - so this witness alone is not
+                //    enough.
+                // 2. a sampled level - transformResId only runs while MIUI is
+                //    really binding a Wi-Fi icon, so sWifiLevel >= 0 means the
+                //    radio has answered at least once this boot. It never
+                //    resets to -1 on its own, which makes it a poor "went away"
+                //    witness but an excellent "was here" one.
+                //
+                // The OR is what keeps a firmware quirk from blanking the arcs:
+                // isIconVisible() alone lost that race. The fallback to mere
+                // presence below stays for a firmware where even the method is
+                // missing.
                 final Object visible = Refl.callByName(child, "isIconVisible");
-                // Fall back to mere presence when the method is not there, so a
-                // firmware that renames it does not lose the arcs altogether.
                 if (!(visible instanceof Boolean) || ((Boolean) visible).booleanValue()) {
                     wifiVisible = true;
                     break;
@@ -1520,6 +1531,14 @@ final class TrioHooks {
             }
         } catch (Throwable ignored) {
             // keep the previous state
+        }
+        if (!wifiVisible && TrioState.sWifiLevel >= 0) {
+            // A level has been sampled but this pass says "absent": trust the
+            // level. The one state this misreads is Wi-Fi genuinely turned off
+            // - and there the drawn level would linger - which is why the
+            // clear icon still wins: C_CLEAR drives the level itself, and the
+            // native icon's return is what the arcs-off switch shows.
+            wifiVisible = true;
         }
         if (TrioState.setWifiPresent(wifiVisible)) {
             invalidateHosts();

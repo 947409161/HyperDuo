@@ -791,6 +791,14 @@ style 0 时该视图宽高恒为 0 —— 单纯把它设成 `VISIBLE` 也不会
 采样只认权威状态栏容器（`isStatusBarContainer`：等于捕获到的 `mStatusBarStatusIcons`，或祖先
 类名为 `MiuiPhoneStatusBarView`），否则控制中心/QS 头部的容器会污染全局状态。
 
+**在场判定改为两路取「或」（1.6.5，issue #5 的修复）**：单靠 `isIconVisible()` 会在一部分固件上
+失真——小米 17 Ultra / HyperOS 4.0.0.28 beta 上 Wi-Fi 已连接但该方法答 false，弧线被永远关掉
+（用户的两张对照图是决定性证据：关弧时原生图标正常回来 = 折叠没问题；开弧时不画 = 判定假阴性）。
+修复：`isIconVisible()` 答 true **或** `sWifiLevel >= 0`（`transformResId` 只有在系统真的绑定
+Wi-Fi 图标时才会被调到，采到过等级 = 无线至少答过一次）即视为在场。等级不会自行回落，所以它不是
+可靠的「离开」证人——但 Wi-Fi 真正关闭时走的是 C_CLEAR 路径（等级本身被清），两路合用恰好互补。
+方法缺失时的「退化为 mere presence」兜底保留不变。
+
 #### 环外视图的前景色（深浅色跟随）
 
 环外两个自建视图（`OutTypeLabel`、`OutSignalView`）的前景色都取自 `TrioState.foreground()`，
