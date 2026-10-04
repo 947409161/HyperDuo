@@ -27,9 +27,9 @@ APK 含 `classes.dex` 至 `classes5.dex`。DEX 字符串与类型表包含以下
 
 检测到 Flyme 电池视图和 Wi‑Fi 视图后，入口现在会安装独立的 `FlymeHooks`，保留现有 MIUI Hook 路径。适配器复用 `FlymeBatteryMeterView.onDraw(Canvas)` 绘制，并在 `onBatteryLevelChanged(int,boolean,boolean)` 后记录回调电量；`mLastLevel` 无效时再从 `BatteryManager.BATTERY_PROPERTY_CAPACITY` 回退读取；充电状态从 `mCharging` / `mQuickCharging` / `mLowPowerMode` 读取，颜色从 `onDarkChanged` 读取。Wi‑Fi 状态优先读取 `FlymeStatusBarWifiView.mState.resId`，图标资源未能分类时再通过 `WifiManager` 采样。Flyme binder 将网络类型作为 `Icon.Resource` 传给 id 为 `mobile_type` 的 `ImageView`；适配器读取资源名，把 `ic_4g_*` / `ic_5g_*` 转成 `4G` / `5G` 等标签，供环内文字使用；移动信号变化通过 `SignalDrawable.onLevelChange` 触发双卡状态刷新。主状态栏容器从 `PhoneStatusBarView.mSystemIconArea` 下查找，并基于 slot 保存和恢复 Flyme 原生视图可见性。
 
-控制中心使用独立的 `com.flyme.systemui.controlcenter.qs.QSStatusBar`。其 `onFinishInflate()` 保存 `mIconContainer`，并与 `mBatteryMeterView` 同处控制中心状态栏；因此只捕获主状态栏会留下控制中心原生 Wi‑Fi / 移动图标。适配器现在分别登记主状态栏与控制中心的 `StatusIconContainer`，两处均按 Flyme slot 隐藏原生网络图标，并在布局、设置变化时同步更新。每个 Flyme 电池 View 的 duo 仍按该 View 的实际宽高计算缩放，以适配状态栏和控制中心不同的尺寸。
+控制中心使用独立的 `com.flyme.systemui.controlcenter.qs.QSStatusBar`。其 `onFinishInflate()` 保存 `mIconContainer`，并与 `mBatteryMeterView` 同处控制中心状态栏；因此只捕获主状态栏会留下控制中心原生 Wi‑Fi / 移动图标。锁屏也使用独立的 `com.android.systemui.statusbar.phone.KeyguardStatusBarView`，其 `onFinishInflate()` 保存 `mStatusIconContainer`。适配器现在分别登记主状态栏、控制中心和锁屏的 `StatusIconContainer`，三处均按 Flyme slot 隐藏原生网络图标，并在布局、设置变化时同步更新。通知栏顶部使用主状态栏容器。每个 Flyme 电池 View 的 duo 按该 View 的实际宽高计算缩放，以适配不同布局尺寸。
 
-这还不是功能完全对齐：环外信号布局仍未适配 Flyme binder；Flyme 没有按当前证据确认的 MIUI 充电超级岛对应入口。锁屏容器也没有按相同方式登记。
+这还不是功能完全对齐：环外信号布局仍未适配 Flyme binder；Flyme 没有按当前证据确认的 MIUI 充电超级岛对应入口。
 
 ## 证据范围与待验证项
 

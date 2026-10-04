@@ -29,6 +29,8 @@ final class FlymeHooks {
             "com.android.systemui.statusbar.phone.PhoneStatusBarView";
     private static final String QS_STATUS_BAR =
             "com.flyme.systemui.controlcenter.qs.QSStatusBar";
+    private static final String KEYGUARD_STATUS_BAR_VIEW =
+            "com.android.systemui.statusbar.phone.KeyguardStatusBarView";
     private static final String ICON_CONTAINER =
             "com.android.systemui.statusbar.phone.StatusIconContainer";
     private static final String WIFI_VIEW =
@@ -62,6 +64,7 @@ final class FlymeHooks {
     private static volatile XposedModule sModule;
     private static volatile Field sSystemIconAreaField;
     private static volatile Field sQsIconContainerField;
+    private static volatile Field sKeyguardIconContainerField;
     private static volatile Field sIgnoredSlotsField;
     private static volatile Field sWifiViewStateField;
     private static volatile Field sWifiStateResIdField;
@@ -87,6 +90,7 @@ final class FlymeHooks {
         count += hookBatteryView(module, cl);
         count += hookStatusBarCapture(module, cl);
         count += hookControlCenterCapture(module, cl);
+        count += hookKeyguardStatusBarCapture(module, cl);
         count += hookIconContainer(module, cl);
         count += hookWifiState(module, cl);
         count += hookMobileSignal(module, cl);
@@ -267,6 +271,35 @@ final class FlymeHooks {
                         if (icons instanceof ViewGroup) {
                             registerIconContainer((ViewGroup) icons);
                             log(sModule, "Flyme Control Center icon container captured");
+                        }
+                        if (self instanceof View) {
+                            final View view = (View) self;
+                            TrioConfig.installReceiver(view.getContext());
+                            TrioState.attachContext(view.getContext());
+                        }
+                        return result;
+                    }
+                });
+    }
+
+    /** Lock Screen owns a third status icon container, separate from the shade. */
+    private static int hookKeyguardStatusBarCapture(XposedModule module, ClassLoader cl) {
+        final Class<?> keyguardStatusBar = Refl.cls(KEYGUARD_STATUS_BAR_VIEW, cl);
+        if (keyguardStatusBar == null) {
+            log(module, "Flyme KeyguardStatusBarView missing");
+            return 0;
+        }
+        sKeyguardIconContainerField = Refl.field(keyguardStatusBar, "mStatusIconContainer");
+        return hook(module, Refl.method(keyguardStatusBar, "onFinishInflate"),
+                "hyperduo-flyme-keyguard", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object result = chain.proceed();
+                        final Object self = chain.getThisObject();
+                        final Object icons = Refl.get(sKeyguardIconContainerField, self);
+                        if (icons instanceof ViewGroup) {
+                            registerIconContainer((ViewGroup) icons);
+                            log(sModule, "Flyme Keyguard icon container captured");
                         }
                         if (self instanceof View) {
                             final View view = (View) self;
