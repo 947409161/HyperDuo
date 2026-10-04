@@ -21,6 +21,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -603,6 +604,16 @@ final class TrioHooks {
                 ((View) container).requestLayout();
             }
         }
+        for (int i = 0; i < containers.size(); i++) {
+            final Object container = containers.get(i);
+            if (container instanceof ViewGroup) {
+                // The native type views were suppressed independently of the
+                // slots, so they are handed back independently too. Runs before
+                // COLLAPSED.clear() because the hand-back reads the same
+                // once-only records the suppression wrote.
+                suppressNativeTypeViews((ViewGroup) container);
+            }
+        }
         synchronized (COLLAPSED) {
             COLLAPSED.clear();
         }
@@ -625,7 +636,8 @@ final class TrioHooks {
                 case 4: return hookStatusBarView(module, cl);
                 case 5: return hookSignalIcons(module, cl);
                 case 6: return hookIconContainerLayout(module, cl);
-                default: return hookMobileType(module, cl);
+                case 7: return hookMobileType(module, cl);
+                default: return hookMobileTypeVisibility(module, cl);
             }
         } catch (Throwable t) {
             log(module, "hook group " + which + " failed: " + t);
@@ -1022,6 +1034,99 @@ final class TrioHooks {
                 });
     }
 
+    /**
+     * Turns MIUI's own "show the network type" requests into "hide it" while the
+     * module draws the type itself.
+     *
+     * <p>{@code MobileSignalAnimatorContainer.setChildVisible(View, boolean)} is
+     * the one door every native type-show walks through:
+     * {@code MiuiMobileIconBinder} collects a {@code mobileTypeSingleVisible}
+     * flow and calls it for both the HyperOS {@code mobile_type_single} TextView
+     * and the classic {@code mobile_signal_container} group. Flipping the
+     * boolean here kills the show at the source - the appear animation never
+     * starts, so there is no one-frame flash the way there would be if the
+     * module only re-hid the view after every layout.
+     *
+     * <p>The same container also serves volte / vowifi / roaming, whose shows
+     * must pass untouched: the flip is gated on the view actually being one of
+     * the native type views, resolved once per view by id and remembered in
+     * {@link #COLLAPSED}-adjacent fashion through the view's own tag slot is
+     * deliberately avoided - a tag write could collide with MIUI's
+     * {@code status_bar_view_state_tag}. The id check is cheap enough per call:
+     * one memoised map look-up.
+     *
+     * <p>Only the {@code true} requests are touched, and only while the module
+     * is drawing the type itself (out of ring). Every other call proceeds
+     * unchanged, so a firmware rename or an unexpected caller costs nothing.
+     */
+    private static int hookMobileTypeVisibility(XposedModule module, ClassLoader cl) {
+        final Class<?> container = Refl.cls(
+                "com.android.systemui.statusbar.views.MobileSignalAnimatorContainer", cl);
+        if (container == null) {
+            log(module, "MobileSignalAnimatorContainer missing");
+            return 0;
+        }
+        return hook(module, Refl.method(container, "setChildVisible",
+                        View.class, boolean.class),
+                "hyperduo-mobile-type-visible", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        if (TrioConfig.appearance().typeOutOfRing) {
+                            final Object arg0 = chain.getArg(0);
+                            final Object arg1 = chain.getArg(1);
+                            if (Boolean.TRUE.equals(arg1)
+                                    && arg0 instanceof View
+                                    && isNativeTypeView((View) arg0)) {
+                                // proceed(Object[]) replaces the arguments for
+                                // the intercepted call; the appear path never
+                                // runs, so no transient copy is made either.
+                                return chain.proceed(new Object[]{arg0, Boolean.FALSE});
+                            }
+                        }
+                        return chain.proceed();
+                    }
+                });
+    }
+
+    /** Memoised view-id to "is a native network-type view" answers. */
+    private static final Map<Integer, Boolean> NATIVE_TYPE_VIEW_CACHE =
+            new HashMap<Integer, Boolean>();
+
+    /**
+     * Whether {@code view} is one of the native views that draw the network
+     * type, matched by the resource name of its id. The two candidates are the
+     * classic {@code mobile_type} ImageView and the HyperOS
+     * {@code mobile_type_single} TextView; anything else - the signal image,
+     * the volte and vowifi views, the dot - is not.
+     */
+    private static boolean isNativeTypeView(View view) {
+        final int id = view.getId();
+        if (id <= 0) {
+            return false;
+        }
+        synchronized (NATIVE_TYPE_VIEW_CACHE) {
+            final Boolean cached = NATIVE_TYPE_VIEW_CACHE.get(id);
+            if (cached != null) {
+                return cached.booleanValue();
+            }
+        }
+        String name = null;
+        try {
+            final android.content.res.Resources res = view.getResources();
+            if (res != null) {
+                name = res.getResourceEntryName(id);
+            }
+        } catch (Throwable ignored) {
+            // a foreign id is simply not one of ours
+        }
+        final boolean match = "mobile_type".equals(name)
+                || "mobile_type_single".equals(name);
+        synchronized (NATIVE_TYPE_VIEW_CACHE) {
+            NATIVE_TYPE_VIEW_CACHE.put(Integer.valueOf(id), Boolean.valueOf(match));
+        }
+        return match;
+    }
+
     // ------------------------------------------------------------- registrations
 
     /**
@@ -1150,6 +1255,106 @@ final class TrioHooks {
         }
         if (relayout) {
             container.requestLayout();
+        }
+        suppressNativeTypeViews(container);
+    }
+
+    /** Resource names of the native views that draw the network-type text. */
+    private static final String[] NATIVE_TYPE_IDS = {"mobile_type_single", "mobile_type"};
+
+    /** Memoised {@code R.id} look-ups; both ids are stable for the process. */
+    private static final Map<String, Integer> NATIVE_TYPE_VIEW_IDS =
+            new HashMap<String, Integer>();
+
+    /**
+     * Hides or restores the native network-type text views inside an owned
+     * container, the ones no slot fold reaches.
+     *
+     * <p>The type text lives <em>inside</em> the mobile slot group: the classic
+     * {@code mobile_type} ImageView (a {@code MobileTypeDrawable}) in the signal
+     * container, and the HyperOS {@code mobile_type_single} TextView beside it.
+     * Folding the "mobile" slot GONEs the whole group, which should be enough -
+     * except MIUI's own binder drives those children directly:
+     * {@code MiuiMobileIconBinder} collects a {@code mobileTypeSingleVisible}
+     * flow and calls {@code MobileSignalAnimatorContainer.setChildVisible},
+     * which sets the child VISIBLE and plays an appear animation. Worse, the
+     * disappear path clones the child and hangs the copy off the container root
+     * as a transient view, drawing it outside the GONE ancestor entirely. Either
+     * way the native "4G"/"5G" reappears - and since the first pass of
+     * {@code MiuiStatusIconContainer.onLayout} parks every child at the
+     * container's left edge, in the status bar that means the middle of the
+     * screen.
+     *
+     * <p>Suppression is wanted exactly while the module draws the type itself,
+     * out of ring: in-ring or off, the module draws no type and the native one
+     * is the user's requested reading, so it is handed back. The hand-back only
+     * touches views this module hid ({@link #unmarkCollapsed}), the same
+     * principle {@code restoreNative} applies to the slots; the appear flow
+     * re-runs on the next binder emit and re-shows the text on its own.
+     *
+     * <p>Callable from the layout pass: {@code setVisibility} on a view whose
+     * visibility already agrees is a framework no-op, and the once-only
+     * {@link #markCollapsed} guard keeps the binder's re-shows from scheduling a
+     * layout per pass.
+     */
+    private static void suppressNativeTypeViews(ViewGroup container) {
+        final boolean suppress = TrioConfig.appearance().typeOutOfRing;
+        final android.content.res.Resources res = resources();
+        if (res == null) {
+            return;
+        }
+        final String pkg = "com.android.systemui";
+        for (int i = 0; i < NATIVE_TYPE_IDS.length; i++) {
+            final Integer id = nativeTypeId(res, pkg, NATIVE_TYPE_IDS[i]);
+            if (id == null) {
+                continue;
+            }
+            View target;
+            try {
+                target = container.findViewById(id.intValue());
+            } catch (Throwable t) {
+                continue;
+            }
+            if (target == null) {
+                continue;
+            }
+            if (suppress) {
+                if (target.getVisibility() == View.VISIBLE && markCollapsed(target)) {
+                    try {
+                        target.setVisibility(View.GONE);
+                    } catch (Throwable ignored) {
+                        unmarkCollapsed(target);
+                    }
+                }
+            } else if (unmarkCollapsed(target)) {
+                try {
+                    if (target.getVisibility() != View.VISIBLE) {
+                        target.setVisibility(View.VISIBLE);
+                    }
+                } catch (Throwable ignored) {
+                    // never let one child abort the pass
+                }
+            }
+        }
+    }
+
+    /** Cached {@code getIdentifier} for one of the native type-view names. */
+    private static Integer nativeTypeId(android.content.res.Resources res,
+                                        String pkg, String name) {
+        synchronized (NATIVE_TYPE_VIEW_IDS) {
+            final Integer cached = NATIVE_TYPE_VIEW_IDS.get(name);
+            if (cached != null) {
+                return cached.intValue() != 0 ? cached : null;
+            }
+            final int id;
+            try {
+                id = res.getIdentifier(name, "id", pkg);
+            } catch (Throwable t) {
+                NATIVE_TYPE_VIEW_IDS.put(name, Integer.valueOf(0));
+                return null;
+            }
+            NATIVE_TYPE_VIEW_IDS.put(name, Integer.valueOf(id));
+            return id != 0 ? Integer.valueOf(id) : null;
         }
     }
 

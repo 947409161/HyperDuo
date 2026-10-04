@@ -630,9 +630,30 @@ Wi-Fi 搬进缺口仍是 canvas 变换（`translate` + `scale`）完成的，几
 单字号完全一致。间距本身没有独立工装：它是 `reserveOutRingStrip` 的一个加数，与标签边距走同一
 条断言路径。
 
-已知风险：原生 `mobile_type_single` 是 mobile 槽组的子级，而 `foldedSlots()` 不包含
-`mobile_type`，所以「关闭显示移动信号点 + 环外」时可能同时看到原生与自建两个标签。环内模式不会
-冲突 —— 它一定伴随 mobile 槽折叠。
+**原生类型文字的压制（1.6.3，取代已关闭的「已知风险」）**：原生类型文字有两个宿主视图——经典的
+`mobile_type`（ImageView + `MobileTypeDrawable`，在 `mobile_signal_container` 内）与 HyperOS 的
+`mobile_type_single`（TextView，在 `mobile_group` 内），两者都在 slot=`mobile` 的
+`ModernStatusBarMobileView` **内部**。折叠整个 mobile 槽本应带走它们，但 MIUI 的 binder
+（`MiuiMobileIconBinder`）独立 collect 一个 `mobileTypeSingleVisible` flow，经
+`MobileSignalAnimatorContainer.setChildVisible(view, true)` **直接把孩子置 VISIBLE 并播出现动画**；
+disappear 路径还会 clone 出副本 `addTransientView` 到容器根，画在 GONE 祖先之外。再叠加
+`MiuiStatusIconContainer.onLayout` 第一趟把每个孩子停在容器左端（状态栏即屏幕中线），就是用户截图里
+「游离在状态栏中部的 4G」。
+
+两层修复，互补：
+
+1. **源头**：hook `MobileSignalAnimatorContainer.setChildVisible`（hook 组 8）。环外模式下，凡是
+   「显示类型」的调用（`visible=true` 且目标视图 id 的资源名是 `mobile_type` / `mobile_type_single`，
+   经 `isNativeTypeView` 逐 id 记忆化）把布尔**翻转成 false** 再 proceed——出现动画根本不启动，
+   连一帧的闪现都没有；volte / vowifi / roaming 的调用原样放行。环内或关闭时不干预。
+2. **兜底**：`settle()` 末尾对 owned 容器 `findViewById` 这两个 id，把 VISIBLE 的强制 GONE
+   （`suppressNativeTypeViews`，走与槽位相同的 `markCollapsed` 一次性记账）。它同时承担**交还**：
+   模式切离环外（或总开关关闭，`restoreNative` 末尾也调它）时按记账把 GONE 的孩子还原成 VISIBLE，
+   MIUI 的 flow 下一次 emit 自然重新接管。
+
+已知风险一节就此关闭：环外模式下原生与自建标签不再同屏。设备离线期间此修复无法上机确认，恢复后
+需验证三点：环外时中部无游离 4G/5G；切回环内/关闭后原生类型文字回到信号图标旁；volte/vowifi 等
+兄弟图标不受影响。
 
 ### 配色
 
