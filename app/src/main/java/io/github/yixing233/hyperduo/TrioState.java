@@ -3,6 +3,7 @@ package io.github.yixing233.hyperduo;
 import android.content.Context;
 import android.content.res.Resources;
 import android.net.wifi.WifiManager;
+import android.os.BatteryManager;
 import android.os.SystemClock;
 import android.telephony.SignalStrength;
 import android.telephony.SubscriptionInfo;
@@ -215,6 +216,12 @@ final class TrioState {
     void refresh() {
         ensureFields(host.getClass());
         level = Refl.getInt(fLevel, host, level);
+        if (level < 0) {
+            final int systemLevel = systemBatteryLevel(host);
+            if (systemLevel >= 0) {
+                level = systemLevel;
+            }
+        }
         charging = Refl.getBool(fCharging, host, charging);
         quickCharging = Refl.getBool(fQuick, host, quickCharging);
         low = Refl.getBool(fLow, host, low);
@@ -258,6 +265,21 @@ final class TrioState {
         if (mobileLevel < 0 && sDataSlot >= 0 && sDataSlot < SIM_SLOTS
                 && slots[sDataSlot] >= 0) {
             mobileLevel = slots[sDataSlot];
+        }
+    }
+
+    /** Flyme initializes mLastLevel to -1 before its first controller callback. */
+    private static int systemBatteryLevel(View host) {
+        try {
+            final BatteryManager battery = (BatteryManager) host.getContext()
+                    .getSystemService(Context.BATTERY_SERVICE);
+            if (battery == null) {
+                return -1;
+            }
+            final int level = battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            return level >= 0 && level <= 100 ? level : -1;
+        } catch (Throwable ignored) {
+            return -1;
         }
     }
 

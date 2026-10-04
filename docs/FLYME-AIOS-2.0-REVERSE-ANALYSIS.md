@@ -25,7 +25,7 @@ APK 含 `classes.dex` 至 `classes5.dex`。DEX 字符串与类型表包含以下
 
 ## 当前适配
 
-检测到 Flyme 电池视图和 Wi‑Fi 视图后，入口现在会安装独立的 `FlymeHooks`，保留现有 MIUI Hook 路径。适配器复用 `FlymeBatteryMeterView.onDraw(Canvas)` 绘制、从 `mLastLevel` / `mCharging` / `mQuickCharging` / `mLowPowerMode` 读取电池状态、从 `onDarkChanged` 取色；Wi‑Fi 状态优先读取 `FlymeStatusBarWifiView.mState.resId`，图标资源未能分类时再通过 `WifiManager` 采样；移动信号变化通过 `SignalDrawable.onLevelChange` 触发双卡状态刷新。主状态栏容器从 `PhoneStatusBarView.mSystemIconArea` 下查找，并基于 slot 保存和恢复 Flyme 原生视图可见性。
+检测到 Flyme 电池视图和 Wi‑Fi 视图后，入口现在会安装独立的 `FlymeHooks`，保留现有 MIUI Hook 路径。适配器复用 `FlymeBatteryMeterView.onDraw(Canvas)` 绘制、从 `mLastLevel` / `mCharging` / `mQuickCharging` / `mLowPowerMode` 读取电池状态；Flyme 将 `mLastLevel` 初始化为 `-1` 时，通过 `BatteryManager.BATTERY_PROPERTY_CAPACITY` 取当前电量作为回退；颜色从 `onDarkChanged` 读取。Wi‑Fi 状态优先读取 `FlymeStatusBarWifiView.mState.resId`，图标资源未能分类时再通过 `WifiManager` 采样；移动信号变化通过 `SignalDrawable.onLevelChange` 触发双卡状态刷新。主状态栏容器从 `PhoneStatusBarView.mSystemIconArea` 下查找，并基于 slot 保存和恢复 Flyme 原生视图可见性。
 
 这一步完成了 Hook 适配的首条路径，但还不是功能完全对齐：网络类型标签和环外信号布局仍走不到 Flyme 的 binder 表示；Flyme 没有按当前证据确认的 MIUI 充电超级岛对应入口。容器定位也只处理主状态栏的 `mSystemIconArea`，不会假定锁屏或控制中心使用同一个容器。
 
