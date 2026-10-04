@@ -50,6 +50,20 @@ final class TrioState {
     static volatile boolean sWifiPresent = true;
 
     /**
+     * Whether the charging super island currently has the battery hidden.
+     *
+     * <p>MIUI reports the island through
+     * {@code MiuiBatteryMeterView.updateIslandChanged}, which lands in
+     * {@code MiuiStatusBatteryContainer.setIsHideBattery(true)}: the battery
+     * keeps its view but loses its measured space, so the native icon row slides
+     * right to clear the island. Sampled by the hook on that setter (see
+     * TrioHooks) and consumed as one rule everywhere - the glyph hides, the
+     * Wi-Fi slot is handed back, the signal reads out of ring - so all three
+     * answers come from one flag and cannot disagree mid-island.
+     */
+    static volatile boolean sIslandHideBattery = false;
+
+    /**
      * Mobile network type label as MIUI itself renders it: "5G", "4G", "5GA",
      * "3G"... Empty when there is nothing to show.
      *
@@ -153,6 +167,7 @@ final class TrioState {
     int wifiLevel = -1;
     int mobileLevel = -1;
     boolean wifiPresent = true;
+    boolean islandHideBattery;
     String mobileType = "";
     /** Per-SIM levels by slot; a fresh array each refresh, never mutated in place. */
     int[] slotLevels = { -1, -1 };
@@ -215,6 +230,7 @@ final class TrioState {
         wifiLevel = sWifiLevel;
         mobileLevel = sMobileLevel;
         wifiPresent = sWifiPresent;
+        islandHideBattery = sIslandHideBattery;
         mobileType = sMobileType;
 
         final int[] slots = sSlotLevels;

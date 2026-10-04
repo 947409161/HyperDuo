@@ -1024,14 +1024,42 @@ int dataSlot, int[] out)` 是唯一的读数解析处。两卡都有读数 ⇒ `
 | `hyperduo-cutout` | `MiuiPhoneStatusBarView.updateCutoutLocation` | 重新追加被 `setIgnoredSlots` 清掉的 slot |
 | `hyperduo-signal` | `MiuiStatusBarIconViewHelper.transformResId` | 读取 Wi-Fi / 移动信号等级并触发重绘 |
 | `hyperduo-mobile-type` | `MobileTypeDrawable.measure` | 读 `mMobileType`（网络类型 3G/4G/5G…）并触发重绘 |
+| `hyperduo-meter-tint` | `MiuiBatteryMeterView.updateLightDarkTint` | 深浅色同拍反色（环外视图跟随动画逐帧上色） |
+| `hyperduo-mobile-type-visible` | `MobileSignalAnimatorContainer.setChildVisible` | 环外时把「显示原生类型」翻转为隐藏 |
+| `hyperduo-island-hide` | `MiuiStatusBatteryContainer.setIsHideBattery` | 追踪充电超级岛隐藏电池，翻转三条接管规则 |
 
-共 9 个 hook。每个 hook 组独立容错：固件重命名某个方法只会让该组打日志跳过，不影响其余。
+共 12 个 hook。每个 hook 组独立容错：固件重命名某个方法只会让该组打日志跳过，不影响其余。
 设置通道不占 hook —— `TrioConfig` 是注册在 remote `SharedPreferences` 上的变更监听器。
 
 `hyperduo-mobile-type` 必须在 `chain.proceed()` **之后**再读字段：`measure()` 会把 `"5G++"`
 就地改写成 `"5G"` 并另置一个 double-plus 标志（`MobileTypeDrawable.java:69`），提前读会拿到
 未规范化的原值。网络类型绝不自行推断 —— `5GA` 是 MIUI 按运营商配置
 （`OperatorConfig.support5GADisplay`）决定的，模块只如实显示系统给的字符串。
+
+### 充电超级岛：电池被隐藏时的接管
+
+充电时 HyperOS 弹出超级岛，`MiuiBatteryControllerImpl` 置 `mIsAddBatteryIsland` →
+`MiuiBatteryMeterView.updateIslandChanged(true)` → `MiuiStatusBatteryContainer.setIsHideBattery(true)`
++ `requestLayout`。容器对 `mBattery` **跳过测量与占位**（图标行的 layout 右边界不再减电池宽度，
+原生图标整体右移让位），但 `mBattery` 视图本身仍 VISIBLE、仍在绘制——这是两条坑的源头：
+
+1. **三合一字形悬空**：字形画在 `mBattery` 里，电池没占位但视图还在画，字形叠在岛的下放空间里。
+2. **环外视图锚点失效**：环外标签/读数锚在电池 meter 的坐标上，电池被跳过后锚点不再可靠。
+
+hook 组 10 拦 `setIsHideBattery`，把值记进 `TrioState.sIslandHideBattery`（全局 volatile：MIUI
+同时隐藏所有容器的电池），值翻转时走一遍与 `applyConfigChange` 同形的反应（refold + 重挂环外两
+视图 + 重绘）。岛在场时三条规则同时生效：
+
+- **字形停画**（`hyperduo-draw` 的门加上 `!islandHideBattery()`）——环内没有可安放的环。
+- **Wi-Fi 槽交还**（`foldedSlots()` 里 `a.wifi && !islandHideBattery()` 才折 wifi）——原生
+  Wi-Fi 图标显示，用户此前从模块里关掉它只是因为弧画在环上，环没了就该回来。
+- **移动信号按环外读数显示**（`foldedSlots()` 无条件折 mobile 槽；`syncOutSignal`/
+  `requestOutSignalSync` 的门放宽为 `stackedOut() || islandHideBattery()`）——环内读不了信号，
+  环外读数顶上，与用户是否开过「环外 + 堆叠」无关。
+
+环外标签（用户开了环外类型时）继续显示：锚链 `labelAnchorIn` 优先取环外读数——岛下读数必在，
+锚点自然落在读数上而非失效的电池上。岛收回（`setIsHideBattery(false)`）时同一套反应把三件事
+还原：字形恢复、Wi-Fi 槽重新折叠（若用户开着弧）、环外读数按用户原设置决定去留。
 
 ## 配置项参考
 

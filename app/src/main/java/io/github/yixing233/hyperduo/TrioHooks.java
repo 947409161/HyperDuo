@@ -146,16 +146,38 @@ final class TrioHooks {
         }
         final List<String> slots = new ArrayList<>(MANAGED_SLOTS.size());
         if (a.wifi) {
-            slots.addAll(WIFI_SLOTS);
+            // The island is the one state that hands Wi-Fi back while the module
+            // draws it: the battery is hidden, so the glyph cannot carry the
+            // arcs and the user asked for the native icon to take over.
+            if (!islandHideBattery()) {
+                slots.addAll(WIFI_SLOTS);
+            }
         }
         // The mobile slot is folded exactly while the module draws the signal
         // itself: as the glyph's dots, or as the out-of-ring reading. Leaving it
         // in place out of ring with the stacked switch off is what keeps MIUI's
         // own icon on screen, which is the whole difference the switch makes.
-        if (a.foldsMobile()) {
+        // Under the island the glyph cannot draw its dots either, so the reading
+        // takes over regardless of where the user keeps the signal - and the
+        // mobile slot folds whenever that reading is drawn.
+        if (a.foldsMobile() || islandHideBattery()) {
             slots.addAll(MOBILE_SLOTS);
         }
         return slots;
+    }
+
+    /**
+     * Whether the charging super island currently has the battery hidden.
+     *
+     * <p>Sourced from {@link TrioState#sIslandHideBattery}, which the hook on
+     * {@code MiuiStatusBatteryContainer.setIsHideBattery} keeps current; this
+     * reads the flag rather than walking for the container, because the ask
+     * happens in contexts ({@code foldedSlots} during a layout, the draw gate)
+     * where no container is at hand - and the flag is global by nature: MIUI
+     * hides the battery of every container at once.
+     */
+    private static boolean islandHideBattery() {
+        return TrioState.sIslandHideBattery;
     }
 
     /** Hosts currently drawing the trio glyph. */
@@ -284,6 +306,7 @@ final class TrioHooks {
         hooked += group(module, cl, 7);
         hooked += group(module, cl, 8);
         hooked += group(module, cl, 9);
+        hooked += group(module, cl, 10);
         log(module, "HyperDuo installed, hooks=" + hooked
                 + " enabled=" + TrioConfig.get().enabled);
     }
@@ -641,6 +664,7 @@ final class TrioHooks {
                 case 7: return hookMobileType(module, cl);
                 case 8: return hookMobileTypeVisibility(module, cl);
                 case 9: return hookMeterTint(module, cl);
+                case 10: return hookIslandHide(module, cl);
                 default: return 0;
             }
         } catch (Throwable t) {
@@ -738,9 +762,12 @@ final class TrioHooks {
                             TrioState.attachContext(((View) self).getContext());
                         }
                         // Just the master switch: whether to paint at all. The
-                        // renderer resolves the rest of the switches itself.
+                        // renderer resolves the rest of the switches itself -
+                        // except the island: with the battery hidden there is no
+                        // ring to draw into, and painting on would leave the
+                        // glyph floating over the island's clearance.
                         if (self instanceof View && canvasArg instanceof Canvas
-                                && TrioConfig.get().enabled) {
+                                && TrioConfig.get().enabled && !islandHideBattery()) {
                             final View host = (View) self;
                             TrioState state = stateFor(host);
                             if (state == null) {
@@ -1090,6 +1117,87 @@ final class TrioHooks {
                         return chain.proceed();
                     }
                 });
+    }
+
+    /**
+     * Tracks the charging super island hiding the battery.
+     *
+     * <p>{@code MiuiBatteryMeterView.updateIslandChanged} - the one callee MIUI
+     * drives when the island appears or disappears - lands in
+     * {@code MiuiStatusBatteryContainer.setIsHideBattery(boolean)} plus a
+     * requestLayout. Hooking that setter is the narrowest point that sees both
+     * directions with the value MIUI actually settled on, for every container
+     * (each has its own battery meter and its own setter, and they all carry
+     * the same value).
+     *
+     * <p>The flag flips three rules at once - the glyph stops painting, the
+     * Wi-Fi slot is handed back, and the out-of-ring reading takes over - so
+     * the reaction after recording is one re-fold of every claimed container
+     * plus a resync of both out-of-ring views, the same round
+     * {@code applyConfigChange} runs for a settings change. Posted: the setter
+     * itself runs before a layout, and the reaction adds no view from inside
+     * one.
+     */
+    private static int hookIslandHide(XposedModule module, ClassLoader cl) {
+        final Class<?> container = Refl.cls(
+                "com.android.systemui.statusbar.views.MiuiStatusBatteryContainer", cl);
+        if (container == null) {
+            log(module, "MiuiStatusBatteryContainer missing");
+            return 0;
+        }
+        return hook(module, Refl.method(container, "setIsHideBattery", Boolean.class),
+                "hyperduo-island-hide", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object arg = chain.getArg(0);
+                        final boolean hide = Boolean.TRUE.equals(arg);
+                        final boolean changed = TrioState.sIslandHideBattery != hide;
+                        final Object result = chain.proceed();
+                        if (changed) {
+                            TrioState.sIslandHideBattery = hide;
+                            reactToIslandChange();
+                        }
+                        return result;
+                    }
+                });
+    }
+
+    /**
+     * One re-fold and one resync after the island flag moved, posted to the
+     * main looper - the same shape {@code applyConfigChange} gives a settings
+     * change, minus the meter restyling the island does not touch.
+     */
+    private static void reactToIslandChange() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    reactToIslandChange();
+                }
+            });
+            return;
+        }
+        refoldContainers();
+        final List<TrioState> hosts;
+        synchronized (HOSTS) {
+            hosts = new ArrayList<TrioState>(HOSTS);
+        }
+        for (int i = 0; i < hosts.size(); i++) {
+            final View v = hosts.get(i).host;
+            if (v == null) {
+                continue;
+            }
+            v.post(new Runnable() {
+                @Override
+                public void run() {
+                    foldHostContainer(v);
+                    v.requestLayout();
+                    syncOutSignal(v);
+                    syncOutTypeLabel(v);
+                    v.invalidate();
+                }
+            });
+        }
     }
 
     /** Memoised view-id to "is a native network-type view" answers. */
@@ -2761,7 +2869,10 @@ final class TrioHooks {
         }
         final ViewGroup container = (ViewGroup) owner;
         final TrioAppearance a = TrioConfig.appearance();
-        final boolean wanted = a.stackedOut();
+        // Under the island the glyph cannot carry the dots, so the reading takes
+        // over regardless of the user's signal-mode or stacked switches - the
+        // islandHideBattery flag already folded the mobile slot for it.
+        final boolean wanted = a.stackedOut() || islandHideBattery();
         final OutSignalView view = findOutSignal(container);
         if (!wanted) {
             removeOutSignal(container);
@@ -2841,7 +2952,11 @@ final class TrioHooks {
      * module is drawing the reading itself and that host has been measured.
      */
     private static void requestOutSignalSync(final ViewGroup container) {
-        if (!TrioConfig.appearance().stackedOut()) {
+        // Same condition syncOutSignal mounts the reading under, so a layout
+        // pass can never queue a sync the posted path would immediately undo -
+        // which matters under the island, where the reading is wanted even with
+        // the stacked switch off.
+        if (!TrioConfig.appearance().stackedOut() && !islandHideBattery()) {
             return;
         }
         final View host = hostIn(container);
