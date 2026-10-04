@@ -143,23 +143,25 @@ final class FlymeHooks {
                 "hyperduo-flyme-draw", new XposedInterface.Hooker() {
                     @Override
                     public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                        final Object result = chain.proceed();
                         final Object self = chain.getThisObject();
                         final Object arg = chain.getArg(0);
                         if (!(self instanceof View) || !(arg instanceof Canvas)) {
-                            return result;
+                            return chain.proceed();
                         }
                         final View host = (View) self;
                         TrioConfig.installReceiver(host.getContext());
                         TrioState.attachContext(host.getContext());
                         applyBatteryPercent(host);
                         if (!TrioConfig.get().enabled) {
-                            return result;
+                            return chain.proceed();
                         }
                         final TrioState state = stateFor(host);
                         state.refresh();
-                        TrioRenderer.draw((Canvas) arg, host, state);
-                        return result;
+                        // Skip Flyme's native ImageView draw while the duo is active.
+                        // Clearing its full canvas afterward can leave square corners
+                        // in the hardware-composited status-bar layer.
+                        TrioRenderer.drawFlyme((Canvas) arg, host, state, TrioConfig.get());
+                        return null;
                     }
                 });
         final int levelChanged = hook(module, Refl.method(viewClass,

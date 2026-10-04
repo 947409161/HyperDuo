@@ -74,6 +74,16 @@ final class TrioRenderer {
      * picked up by the very next frame.
      */
     static void draw(Canvas canvas, View host, TrioState s, TrioSettings cfg) {
+        draw(canvas, host, s, cfg, true);
+    }
+
+    /** Flyme can suppress its native ImageView draw call, so it needs no canvas clear. */
+    static void drawFlyme(Canvas canvas, View host, TrioState s, TrioSettings cfg) {
+        draw(canvas, host, s, cfg, false);
+    }
+
+    private static void draw(Canvas canvas, View host, TrioState s, TrioSettings cfg,
+                             boolean clearWhenDone) {
         final int w = host.getWidth();
         final int h = host.getHeight();
         if (w <= 0 || h <= 0) {
@@ -81,7 +91,7 @@ final class TrioRenderer {
         }
         drawInto(canvas, w, h, s.level, s.charging, s.quickCharging, s.powerSave, s.low,
                 s.wifiPresent ? s.wifiLevel : -1, s.mobileLevel, s.slotLevels, s.mobileType,
-                s.foreground(), cfg, true);
+                s.foreground(), cfg, clearWhenDone);
     }
 
     /**
