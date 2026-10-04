@@ -1,6 +1,7 @@
 package io.github.yixing233.hyperduo;
 
 import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.content.res.Resources;
 import android.view.View;
 import android.view.ViewGroup;
@@ -69,6 +70,9 @@ final class FlymeHooks {
     private static volatile Field sWifiViewStateField;
     private static volatile Field sWifiStateResIdField;
     private static volatile Field sBatteryPercentField;
+    private static volatile Field sBatteryDrawableField;
+    private static volatile Field sBatteryNormalDrawableField;
+    private static volatile Field sBatteryClipWidthField;
     private static volatile Field sResourceIconResField;
 
     private FlymeHooks() {
@@ -139,6 +143,9 @@ final class FlymeHooks {
             return 0;
         }
         sBatteryPercentField = Refl.field(viewClass, "mBatteryPercentView");
+        sBatteryDrawableField = Refl.field(viewClass, "mDrawable");
+        sBatteryNormalDrawableField = Refl.field(viewClass, "mBatteryNormal");
+        sBatteryClipWidthField = Refl.field(viewClass, "mClipWidth");
         final int draw = hook(module, Refl.method(viewClass, "onDraw", Canvas.class),
                 "hyperduo-flyme-draw", new XposedInterface.Hooker() {
                     @Override
@@ -162,6 +169,36 @@ final class FlymeHooks {
                         // in the hardware-composited status-bar layer.
                         TrioRenderer.drawFlyme((Canvas) arg, host, state, TrioConfig.get());
                         return null;
+                    }
+                });
+        final int measure = hook(module, Refl.method(viewClass, "onMeasure",
+                        int.class, int.class),
+                "hyperduo-flyme-battery-measure", new XposedInterface.Hooker() {
+                    @Override
+                    public Object intercept(XposedInterface.Chain chain) throws Throwable {
+                        final Object self = chain.getThisObject();
+                        if (!(self instanceof View) || !TrioConfig.get().enabled) {
+                            return chain.proceed();
+                        }
+                        final Object currentDrawable = Refl.get(sBatteryDrawableField, self);
+                        final Object stableDrawable =
+                                Refl.get(sBatteryNormalDrawableField, self);
+                        if (!(currentDrawable instanceof Drawable)
+                                || !(stableDrawable instanceof Drawable)) {
+                            return chain.proceed();
+                        }
+                        final int clipWidth = Refl.getInt(sBatteryClipWidthField, self, 0);
+                        // Flyme swaps mDrawable to its charging bolt and animates mClipWidth.
+                        // That changes this ImageView's measured width and shifts neighboring
+                        // status icons even though HyperDuo has replaced the native drawing.
+                        Refl.set(sBatteryDrawableField, self, stableDrawable);
+                        Refl.set(sBatteryClipWidthField, self, Integer.valueOf(0));
+                        try {
+                            return chain.proceed();
+                        } finally {
+                            Refl.set(sBatteryDrawableField, self, currentDrawable);
+                            Refl.set(sBatteryClipWidthField, self, Integer.valueOf(clipWidth));
+                        }
                     }
                 });
         final int levelChanged = hook(module, Refl.method(viewClass,
@@ -219,7 +256,7 @@ final class FlymeHooks {
                         return result;
                     }
                 });
-        return draw + levelChanged + dark + detached;
+        return draw + measure + levelChanged + dark + detached;
     }
 
     private static int hookStatusBarCapture(XposedModule module, ClassLoader cl) {
