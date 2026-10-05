@@ -339,7 +339,19 @@ public final class TrioSettings {
                             / safeDensity),
                     Prefs.MIN_OUT_TYPE_SIZE_DP, Prefs.MAX_OUT_TYPE_SIZE_DP);
         }
-        return Prefs.DEF_OUT_TYPE_SIZE_DP;
+        // Neither key present: the user never touched the slider, so the honest
+        // default is the shipped *pixel* size resolved on this display - not a
+        // fixed dp. The 1.6.2 change replaced the stored key with a dp but kept
+        // 11dp as the fallback; that equals the old 32px only at density 3, and
+        // on any other density the label silently changed size the moment the
+        // user updated (reported as "环外5G图标过小"). Dividing the factory px by
+        // the real density - exactly what the migration above does for tuned
+        // values - keeps the untouched installs at the physical size they have
+        // always shown, on every screen.
+        final float safeDensity = density > 0f ? density : Prefs.AUTHORED_DENSITY;
+        return Prefs.clamp(
+                Math.round(Prefs.DEF_OUT_TYPE_SIZE / safeDensity),
+                Prefs.MIN_OUT_TYPE_SIZE_DP, Prefs.MAX_OUT_TYPE_SIZE_DP);
     }
 
     /**
