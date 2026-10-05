@@ -40,6 +40,8 @@ final class TrioState {
     static volatile int sMobileLevel = -1;
     /** Last level delivered by FlymeBatteryMeterView's BatteryController callback. */
     private static volatile int sFlymeBatteryLevel = -1;
+    private static volatile boolean sFlymePluggedIn;
+    private static volatile boolean sFlymeCharging;
 
     /**
      * Whether the status bar is currently showing a Wi-Fi indicator at all.
@@ -231,10 +233,11 @@ final class TrioState {
         charging = Refl.getBool(fCharging, host, charging);
         if (!charging && "com.flyme.statusbar.battery.FlymeBatteryMeterView"
                 .equals(host.getClass().getName())) {
-            // Flyme's native mCharging can be false for a plugged-in slow-charge
-            // state even though BatteryManager already reports CHARGING. The quick
-            // charge flag is only a style/color hint and must not gate the bolt.
-            charging = systemIsCharging(host);
+            // Keep the raw BatteryController callback ahead of Flyme's drawable
+            // policy: slow charging may not set mCharging or BatteryManager's
+            // status, but it is still a plugged-in, non-full battery.
+            charging = sFlymeCharging || (sFlymePluggedIn && level < 100)
+                    || systemIsCharging(host);
         }
         quickCharging = Refl.getBool(fQuick, host, quickCharging);
         low = Refl.getBool(fLow, host, low);
@@ -281,10 +284,12 @@ final class TrioState {
         }
     }
 
-    static void noteFlymeBatteryLevel(int level) {
+    static void noteFlymeBatteryState(int level, boolean pluggedIn, boolean charging) {
         if (level >= 0 && level <= 100) {
             sFlymeBatteryLevel = level;
         }
+        sFlymePluggedIn = pluggedIn;
+        sFlymeCharging = charging;
     }
 
     /** Flyme initializes mLastLevel to -1 before its first controller callback. */

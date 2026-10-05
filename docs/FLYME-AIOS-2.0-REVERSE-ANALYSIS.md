@@ -29,7 +29,7 @@ APK 含 `classes.dex` 至 `classes5.dex`。DEX 字符串与类型表包含以下
 
 控制中心使用独立的 `com.flyme.systemui.controlcenter.qs.QSStatusBar`。其 `onFinishInflate()` 保存 `mIconContainer`，并与 `mBatteryMeterView` 同处控制中心状态栏；因此只捕获主状态栏会留下控制中心原生 Wi‑Fi / 移动图标。锁屏也使用独立的 `com.android.systemui.statusbar.phone.KeyguardStatusBarView`，其 `onFinishInflate()` 保存 `mStatusIconContainer`。适配器现在分别登记主状态栏、控制中心和锁屏的 `StatusIconContainer`，三处均按 Flyme slot 隐藏原生网络图标，并在布局、设置变化时同步更新。通知栏顶部使用主状态栏容器。每个 Flyme 电池 View 的 duo 按该 View 的实际宽高计算缩放，以适配不同布局尺寸。
 
-Flyme 电池 View 在 `apply(boolean)` 中会切换 `mDrawable` 到充电闪电资源、动画更新 `mClipWidth` 并请求重测；`onMeasure()` 又用 drawable 固有宽度加 `mClipWidth` 决定 View 宽度。这会在 Duo 已替换原生绘制时仍改变状态栏占位，让相邻图标随充电闪动。Duo 启用时，测量 hook 暂时使用稳定的普通电池 Drawable 且将裁剪宽度置零，调用原测量后恢复字段，使充电状态不再改变占位尺寸。充电显示以 Flyme `mCharging` 为主；慢充时若该字段未置位，则回退到 `BatteryManager.isCharging()`，`mQuickCharging` 只决定闪电样式颜色，不控制是否显示闪电。
+Flyme 电池 View 在 `apply(boolean)` 中会切换 `mDrawable` 到充电闪电资源、动画更新 `mClipWidth` 并请求重测；`onMeasure()` 又用 drawable 固有宽度加 `mClipWidth` 决定 View 宽度。这会在 Duo 已替换原生绘制时仍改变状态栏占位，让相邻图标随充电闪动。Duo 启用时，测量 hook 暂时使用稳定的普通电池 Drawable 且将裁剪宽度置零，调用原测量后恢复字段，使充电状态不再改变占位尺寸。充电显示读取 Flyme BatteryController 回调中的原始 `pluggedIn` / `charging` 参数，并以 `BatteryManager.isCharging()` 兜底；当 Flyme 把慢充报告为已接电但未充电时，只要电量未满也显示闪电。`mQuickCharging` 只决定闪电样式颜色，不控制是否显示闪电。
 
 这还不是功能完全对齐：环外信号布局仍未适配 Flyme binder；Flyme 没有按当前证据确认的 MIUI 充电超级岛对应入口。
 

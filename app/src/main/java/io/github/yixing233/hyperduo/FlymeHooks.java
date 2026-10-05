@@ -209,8 +209,13 @@ final class FlymeHooks {
                         final Object result = chain.proceed();
                         final Object self = chain.getThisObject();
                         final Object value = chain.getArg(0);
-                        if (self instanceof View && value instanceof Number) {
-                            TrioState.noteFlymeBatteryLevel(((Number) value).intValue());
+                        final Object plugged = chain.getArg(1);
+                        final Object charging = chain.getArg(2);
+                        if (self instanceof View && value instanceof Number
+                                && plugged instanceof Boolean && charging instanceof Boolean) {
+                            TrioState.noteFlymeBatteryState(((Number) value).intValue(),
+                                    ((Boolean) plugged).booleanValue(),
+                                    ((Boolean) charging).booleanValue());
                             ((View) self).postInvalidate();
                         }
                         return result;
