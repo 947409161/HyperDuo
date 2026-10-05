@@ -229,6 +229,13 @@ final class TrioState {
             }
         }
         charging = Refl.getBool(fCharging, host, charging);
+        if (!charging && "com.flyme.statusbar.battery.FlymeBatteryMeterView"
+                .equals(host.getClass().getName())) {
+            // Flyme's native mCharging can be false for a plugged-in slow-charge
+            // state even though BatteryManager already reports CHARGING. The quick
+            // charge flag is only a style/color hint and must not gate the bolt.
+            charging = systemIsCharging(host);
+        }
         quickCharging = Refl.getBool(fQuick, host, quickCharging);
         low = Refl.getBool(fLow, host, low);
         powerSave = Refl.getBool(fPowerSave, host, powerSave);
@@ -292,6 +299,16 @@ final class TrioState {
             return level >= 0 && level <= 100 ? level : -1;
         } catch (Throwable ignored) {
             return -1;
+        }
+    }
+
+    private static boolean systemIsCharging(View host) {
+        try {
+            final BatteryManager battery = (BatteryManager) host.getContext()
+                    .getSystemService(Context.BATTERY_SERVICE);
+            return battery != null && battery.isCharging();
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
