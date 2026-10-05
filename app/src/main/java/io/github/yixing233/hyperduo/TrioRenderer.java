@@ -74,19 +74,26 @@ final class TrioRenderer {
      * picked up by the very next frame.
      */
     static void draw(Canvas canvas, View host, TrioState s, TrioSettings cfg) {
-        draw(canvas, host, s, cfg, true);
+        drawState(canvas, host.getWidth(), host.getHeight(), s, cfg, true);
     }
 
     /** Flyme can suppress its native ImageView draw call, so it needs no canvas clear. */
     static void drawFlyme(Canvas canvas, View host, TrioState s, TrioSettings cfg) {
-        draw(canvas, host, s, cfg, false);
+        drawState(canvas, host.getWidth(), host.getHeight(), s, cfg, false);
     }
 
-    private static void draw(Canvas canvas, View host, TrioState s, TrioSettings cfg,
-                             boolean clearWhenDone) {
-        final int w = host.getWidth();
-        final int h = host.getHeight();
-        if (w <= 0 || h <= 0) {
+    /**
+     * The same frame for a caller that has a canvas of its own instead of a host
+     * view to measure: the glyph window of {@code TrioOverlay} is sized by its
+     * own layout params, and there is no hooked view behind it to ask.
+     */
+    static void drawState(Canvas canvas, int w, int h, TrioState s, TrioSettings cfg) {
+        drawState(canvas, w, h, s, cfg, true);
+    }
+
+    private static void drawState(Canvas canvas, int w, int h, TrioState s,
+                                  TrioSettings cfg, boolean clearWhenDone) {
+        if (w <= 0 || h <= 0 || s == null || cfg == null) {
             return;
         }
         drawInto(canvas, w, h, s.level, s.charging, s.quickCharging, s.powerSave, s.low,

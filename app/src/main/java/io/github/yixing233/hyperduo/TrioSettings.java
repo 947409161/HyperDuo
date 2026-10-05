@@ -82,6 +82,15 @@ public final class TrioSettings {
      * icon in place the module draws no signal for this to narrow.
      */
     public boolean dataSimOnly;
+    /**
+     * Draws the glyph in a window of its own instead of in the status bar view.
+     *
+     * <p>Stored under the frozen key {@link Prefs#KEY_OVERLAY}. The status bar
+     * window is about 43dp tall and clips what it cannot show; this flag is what
+     * lets the glyph be drawn whole, at the price of hanging below the bar's own
+     * background.
+     */
+    public boolean overlayGlyph;
 
     public boolean roleColors;
     public int criticalOnDark;
@@ -157,6 +166,7 @@ public final class TrioSettings {
         s.signalMode = Prefs.DEF_SIGNAL_MODE;
         s.stackedSignal = Prefs.DEF_STACKED_SIGNAL;
         s.dataSimOnly = Prefs.DEF_DATA_SIM_ONLY;
+        s.overlayGlyph = Prefs.DEF_OVERLAY;
 
         s.roleColors = Prefs.DEF_ROLE_COLORS;
         s.criticalOnDark = Prefs.DEF_COLOR_CRITICAL_ON_DARK;
@@ -224,6 +234,7 @@ public final class TrioSettings {
                 Prefs.MIN_SIGNAL_MODE, Prefs.MAX_SIGNAL_MODE);
         s.stackedSignal = p.getBoolean(Prefs.KEY_STACKED_SIGNAL, Prefs.DEF_STACKED_SIGNAL);
         s.dataSimOnly = p.getBoolean(Prefs.KEY_DATA_SIM_ONLY, Prefs.DEF_DATA_SIM_ONLY);
+        s.overlayGlyph = p.getBoolean(Prefs.KEY_OVERLAY, Prefs.DEF_OVERLAY);
 
         s.roleColors = p.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = p.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -328,7 +339,19 @@ public final class TrioSettings {
                             / safeDensity),
                     Prefs.MIN_OUT_TYPE_SIZE_DP, Prefs.MAX_OUT_TYPE_SIZE_DP);
         }
-        return Prefs.DEF_OUT_TYPE_SIZE_DP;
+        // Neither key present: the user never touched the slider, so the honest
+        // default is the shipped *pixel* size resolved on this display - not a
+        // fixed dp. The 1.6.2 change replaced the stored key with a dp but kept
+        // 11dp as the fallback; that equals the old 32px only at density 3, and
+        // on any other density the label silently changed size the moment the
+        // user updated (reported as "环外5G图标过小"). Dividing the factory px by
+        // the real density - exactly what the migration above does for tuned
+        // values - keeps the untouched installs at the physical size they have
+        // always shown, on every screen.
+        final float safeDensity = density > 0f ? density : Prefs.AUTHORED_DENSITY;
+        return Prefs.clamp(
+                Math.round(Prefs.DEF_OUT_TYPE_SIZE / safeDensity),
+                Prefs.MIN_OUT_TYPE_SIZE_DP, Prefs.MAX_OUT_TYPE_SIZE_DP);
     }
 
     /**
@@ -368,6 +391,7 @@ public final class TrioSettings {
         s.signalMode = signalMode;
         s.stackedSignal = stackedSignal;
         s.dataSimOnly = dataSimOnly;
+        s.overlayGlyph = overlayGlyph;
 
         s.roleColors = roleColors;
         s.criticalOnDark = criticalOnDark;
@@ -426,6 +450,7 @@ public final class TrioSettings {
             case Prefs.KEY_SIGNAL_MODE: signalMode = src.signalMode; return true;
             case Prefs.KEY_STACKED_SIGNAL: stackedSignal = src.stackedSignal; return true;
             case Prefs.KEY_DATA_SIM_ONLY: dataSimOnly = src.dataSimOnly; return true;
+            case Prefs.KEY_OVERLAY: overlayGlyph = src.overlayGlyph; return true;
             case Prefs.KEY_ROLE_COLORS: roleColors = src.roleColors; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_DARK: criticalOnDark = src.criticalOnDark; return true;
             case Prefs.KEY_COLOR_CRITICAL_ON_LIGHT: criticalOnLight = src.criticalOnLight; return true;
@@ -481,6 +506,7 @@ public final class TrioSettings {
                 Prefs.MIN_SIGNAL_MODE, Prefs.MAX_SIGNAL_MODE);
         s.stackedSignal = bundle.getBoolean(Prefs.KEY_STACKED_SIGNAL, Prefs.DEF_STACKED_SIGNAL);
         s.dataSimOnly = bundle.getBoolean(Prefs.KEY_DATA_SIM_ONLY, Prefs.DEF_DATA_SIM_ONLY);
+        s.overlayGlyph = bundle.getBoolean(Prefs.KEY_OVERLAY, Prefs.DEF_OVERLAY);
 
         s.roleColors = bundle.getBoolean(Prefs.KEY_ROLE_COLORS, Prefs.DEF_ROLE_COLORS);
         s.criticalOnDark = bundle.getInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, Prefs.DEF_COLOR_CRITICAL_ON_DARK);
@@ -576,6 +602,7 @@ public final class TrioSettings {
         b.putInt(Prefs.KEY_SIGNAL_MODE, signalMode);
         b.putBoolean(Prefs.KEY_STACKED_SIGNAL, stackedSignal);
         b.putBoolean(Prefs.KEY_DATA_SIM_ONLY, dataSimOnly);
+        b.putBoolean(Prefs.KEY_OVERLAY, overlayGlyph);
 
         b.putBoolean(Prefs.KEY_ROLE_COLORS, roleColors);
         b.putInt(Prefs.KEY_COLOR_CRITICAL_ON_DARK, criticalOnDark);
@@ -602,5 +629,65 @@ public final class TrioSettings {
 
         b.putBoolean(Prefs.KEY_DEBUG_LOG, debugLog);
         return b;
+    }
+
+    /**
+     * Field-wise equality. Exists for one caller - the boot-time re-read in
+     * {@code TrioConfig}, which must not notify the listeners (and re-fold every
+     * container) when the delayed read saw the same values the first one did -
+     * but a full comparison is also what a snapshot type ought to answer.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof TrioSettings)) {
+            return false;
+        }
+        final TrioSettings s = (TrioSettings) o;
+        return enabled == s.enabled
+                && showWifi == s.showWifi
+                && showMobile == s.showMobile
+                && showValue == s.showValue
+                && showBolt == s.showBolt
+                && mobileTypeMode == s.mobileTypeMode
+                && valueCentred == s.valueCentred
+                && trioStyle == s.trioStyle
+                && dualSim == s.dualSim
+                && signalMode == s.signalMode
+                && stackedSignal == s.stackedSignal
+                && dataSimOnly == s.dataSimOnly
+                && overlayGlyph == s.overlayGlyph
+                && roleColors == s.roleColors
+                && criticalOnDark == s.criticalOnDark
+                && criticalOnLight == s.criticalOnLight
+                && chargingOnDark == s.chargingOnDark
+                && chargingOnLight == s.chargingOnLight
+                && lowOnDark == s.lowOnDark
+                && lowOnLight == s.lowOnLight
+                && lowThreshold == s.lowThreshold
+                && ringStroke == s.ringStroke
+                && arcStroke == s.arcStroke
+                && valueSize == s.valueSize
+                && valueWeight == s.valueWeight
+                && typeSize == s.typeSize
+                && outTypeSize == s.outTypeSize
+                && outSignalSize == s.outSignalSize
+                && outTypeMarginLeft == s.outTypeMarginLeft
+                && outTypeMarginRight == s.outTypeMarginRight
+                && outSignalMargin == s.outSignalMargin
+                && typeSuffixScale == s.typeSuffixScale
+                && typeWeight == s.typeWeight
+                && trackAlpha == s.trackAlpha
+                && debugLog == s.debugLog;
+    }
+
+    @Override
+    public int hashCode() {
+        // Fields are small ints and booleans; a cheap fold is enough. The class
+        // is used as a value only through equals() - nothing hashes it.
+        int h = (enabled ? 1 : 0) ^ (mobileTypeMode << 1) ^ signalMode ^ trioStyle;
+        return h != 0 ? h : 1;
     }
 }
