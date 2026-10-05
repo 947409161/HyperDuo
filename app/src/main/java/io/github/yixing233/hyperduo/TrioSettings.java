@@ -603,4 +603,63 @@ public final class TrioSettings {
         b.putBoolean(Prefs.KEY_DEBUG_LOG, debugLog);
         return b;
     }
+
+    /**
+     * Field-wise equality. Exists for one caller - the boot-time re-read in
+     * {@code TrioConfig}, which must not notify the listeners (and re-fold every
+     * container) when the delayed read saw the same values the first one did -
+     * but a full comparison is also what a snapshot type ought to answer.
+     */
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof TrioSettings)) {
+            return false;
+        }
+        final TrioSettings s = (TrioSettings) o;
+        return enabled == s.enabled
+                && showWifi == s.showWifi
+                && showMobile == s.showMobile
+                && showValue == s.showValue
+                && showBolt == s.showBolt
+                && mobileTypeMode == s.mobileTypeMode
+                && valueCentred == s.valueCentred
+                && trioStyle == s.trioStyle
+                && dualSim == s.dualSim
+                && signalMode == s.signalMode
+                && stackedSignal == s.stackedSignal
+                && dataSimOnly == s.dataSimOnly
+                && roleColors == s.roleColors
+                && criticalOnDark == s.criticalOnDark
+                && criticalOnLight == s.criticalOnLight
+                && chargingOnDark == s.chargingOnDark
+                && chargingOnLight == s.chargingOnLight
+                && lowOnDark == s.lowOnDark
+                && lowOnLight == s.lowOnLight
+                && lowThreshold == s.lowThreshold
+                && ringStroke == s.ringStroke
+                && arcStroke == s.arcStroke
+                && valueSize == s.valueSize
+                && valueWeight == s.valueWeight
+                && typeSize == s.typeSize
+                && outTypeSize == s.outTypeSize
+                && outSignalSize == s.outSignalSize
+                && outTypeMarginLeft == s.outTypeMarginLeft
+                && outTypeMarginRight == s.outTypeMarginRight
+                && outSignalMargin == s.outSignalMargin
+                && typeSuffixScale == s.typeSuffixScale
+                && typeWeight == s.typeWeight
+                && trackAlpha == s.trackAlpha
+                && debugLog == s.debugLog;
+    }
+
+    @Override
+    public int hashCode() {
+        // Fields are small ints and booleans; a cheap fold is enough. The class
+        // is used as a value only through equals() - nothing hashes it.
+        int h = (enabled ? 1 : 0) ^ (mobileTypeMode << 1) ^ signalMode ^ trioStyle;
+        return h != 0 ? h : 1;
+    }
 }

@@ -88,6 +88,56 @@ public final class TrioConfig {
         } catch (Throwable t) {
             TrioHooks.log(TrioHooks.LOG_WARN, "cannot watch preferences: " + t);
         }
+        // Re-read once the framework has had time to serve the user's values.
+        //
+        // install() runs inside the first hook callback of a booting SystemUI,
+        // and on a cold start the remote-preferences map can still hold
+        // defaults for a few seconds: the daemon has not pushed the user's
+        // file across yet. The first reload() then publishes an all-defaults
+        // snapshot - signal mode in-ring, arcs on, type off - so the early
+        // layout passes fold nothing, reserve nothing, and the native icons
+        // share the bar with whatever the module has mounted by then (issue
+        // #9: a stray native "5G" after every reboot until a toggle forces a
+        // re-read). The change listener cannot heal this: it only fires on
+        // writes, and nobody writes at boot.
+        //
+        // One delayed re-read closes the window. The change listener stays
+        // registered the whole time, so a user write in between simply wins
+        // twice; reloadIfChanged() publishes only when the file really moved,
+        // so the second read is usually a no-op.
+        final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        main.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                reloadIfChanged();
+            }
+        }, RESYNC_DELAY_MS);
+        main.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                reloadIfChanged();
+            }
+        }, RESYNC_DELAY_MS * 4);
+    }
+
+    /** How long after install to re-read the remote map, in milliseconds. */
+    private static final long RESYNC_DELAY_MS = 5_000L;
+
+    /**
+     * Re-reads the whole configuration and notifies the listeners only when
+     * something actually moved - the boot-time backstop for the early read
+     * having seen defaults. Notified through the normal path so the hosts
+     * re-fold and re-sync exactly as they would for a settings change.
+     */
+    private static void reloadIfChanged() {
+        final TrioSettings previous = sSnapshot;
+        reload();
+        final TrioSettings now = sSnapshot;
+        if (previous == now || previous.equals(now)) {
+            return;
+        }
+        TrioHooks.log(TrioHooks.LOG_INFO, "delayed settings re-read applied");
+        notifyChanged();
     }
 
     /** Immutable view of every setting the renderer cares about. */
